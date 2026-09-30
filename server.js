@@ -16,6 +16,9 @@ import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 import dotenv from "dotenv";
+import { ContabiliumClient } from "./src/contabilium-client.js";
+import { registerContabiliumTools } from "./src/register-tools.js";
+import { SYSTEM_INSTRUCTION } from "./src/instructions.js";
 
 dotenv.config();
 
@@ -112,177 +115,18 @@ function extractUserCredentials(req) {
  * Fábrica de servidor MCP aislado por sesión de usuario
  */
 function createMcpServerForSession(credentials) {
-  const { clientId, clientSecret, country = "AR" } = credentials;
-  const baseUrl = COUNTRY_URLS[country] || COUNTRY_URLS.AR;
-
-  let cachedToken = null;
-  let tokenExpiresAt = 0;
-
-  async function ensureValidToken(forceRefresh = false) {
-    const now = Date.now();
-    const bufferMs = 5 * 60 * 1000;
-
-    if (!forceRefresh && cachedToken && now < (tokenExpiresAt - bufferMs)) {
-      return cachedToken;
-    }
-
-    const tokenUrl = `${baseUrl}/token`;
-    const bodyParams = new URLSearchParams({
-      grant_type: "client_credentials",
-      client_id: clientId.trim(),
-      client_secret: clientSecret.trim(),
-    });
-
-    const response = await fetch(tokenUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        Accept: "application/json",
-      },
-      body: bodyParams.toString(),
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Error de autenticación en Contabilium (${response.status}): ${errText}`);
-    }
-
-    const data = await response.json();
-    cachedToken = data.access_token;
-    const expiresIn = Number(data.expires_in) || 86399;
-    tokenExpiresAt = Date.now() + (expiresIn * 1000);
-    return cachedToken;
-  }
-
-  async function callApi(endpoint, method = "GET", params = null, body = null, retry = true) {
-    const token = await ensureValidToken();
-    let cleanEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
-    if (!cleanEndpoint.startsWith("/api") && !cleanEndpoint.startsWith("/notificador")) {
-      cleanEndpoint = `/api${cleanEndpoint}`;
-    }
-
-    const url = new URL(`${baseUrl}${cleanEndpoint}`);
-    if (params) {
-      for (const [k, v] of Object.entries(params)) {
-        if (v !== undefined && v !== null) url.searchParams.append(k, String(v));
-      }
-    }
-
-    const headers = { Authorization: `Bearer ${token}`, Accept: "application/json" };
-    const opts = { method: method.toUpperCase(), headers };
-    if (body && ["POST", "PUT", "PATCH"].includes(opts.method)) {
-      headers["Content-Type"] = "application/json";
-      opts.body = JSON.stringify(body);
-    }
-
-    const res = await fetch(url.toString(), opts);
-    if (res.status === 401 && retry) {
-      await ensureValidToken(true);
-      return callApi(endpoint, method, params, body, false);
-    }
-
-    if (res.status === 429) {
-      throw new Error("HTTP 429: Límite de tasa excedido en Contabilium (25 req/10s). Pausa 60s.");
-    }
-
-    const cType = res.headers.get("content-type") || "";
-    const payload = cType.includes("application/json") ? await res.json() : await res.text();
-    return { status: res.status, ok: res.ok, payload };
-  }
-
-  const server = new McpServer({
-    name: "contabilium-remote-mcp",
-    version: "1.0.0",
-  });
-
-  server.tool(
-    "contabilium_auth_status",
-    "Verifica el estado del token y conectividad con tu cuenta de Contabilium.",
-    { ping: z.boolean().default(true) },
-    async ({ ping }) => {
-      let masked = "NO_CONFIGURADO";
-      if (clientId) {
-        const parts = clientId.split("@");
-        masked = parts.length === 2 ? `${parts[0].slice(0, 2)}***@${parts[1]}` : `${clientId.slice(0, 3)}***`;
-      }
-      const tokenActive = Boolean(cachedToken && Date.now() < tokenExpiresAt);
-      const remainingMinutes = tokenActive ? Math.max(0, Math.round((tokenExpiresAt - Date.now()) / 60000)) : 0;
-
-      const report = {
-        configuracion: { usuarioIdentificador: masked, clientSecretProtegido: true, cifrado: "AES-256-GCM", pais: country, urlBase: baseUrl },
-        token: { activo: tokenActive, minutosRestantes: remainingMinutes },
-      };
-
-      if (ping) {
-        try {
-          const pingRes = await callApi("/usuarios/obtenerinfo", "GET");
-          if (pingRes.ok && typeof pingRes.payload === "object") {
-            report.conexionEnVivo = {
-              conectado: true,
-              razonSocial: pingRes.payload.RazonSocial,
-              cuit: pingRes.payload.CUIT,
-              condicionIVA: pingRes.payload.CondicionIVA,
-              tieneFE: Boolean(pingRes.payload.TieneFE),
-            };
-          }
-        } catch (e) {
-          report.conexionEnVivo = { conectado: false, error: e.message };
-        }
-      }
-      return { content: [{ type: "text", text: JSON.stringify(report, null, 2) }] };
-    }
-  );
-
-  server.tool(
-    "contabilium_get_account_info",
-    "Obtiene la configuración y datos fiscales de la cuenta en Contabilium.",
-    {},
-    async () => {
-      const res = await callApi("/usuarios/obtenerinfo", "GET");
-      return { content: [{ type: "text", text: JSON.stringify(res.payload, null, 2) }] };
-    }
-  );
-
-  server.tool(
-    "contabilium_api_request",
-    "Ejecuta llamadas autorizadas contra cualquier endpoint de la API de Contabilium.",
+  const client = new ContabiliumClient(credentials);
+  const server = new McpServer(
     {
-      endpoint: z.string().describe("Ruta del endpoint (ej. '/api/conceptos/search', '/api/stock/Novedades', '/api/comprobantes/search')."),
-      method: z.enum(["GET", "POST", "PUT", "DELETE"]).default("GET"),
-      params: z.record(z.any()).optional(),
-      body: z.record(z.any()).optional(),
+      name: "contabilium-mcp",
+      version: "1.0.0",
     },
-    async ({ endpoint, method, params, body }) => {
-      const res = await callApi(endpoint, method, params, body);
-      return { content: [{ type: "text", text: JSON.stringify({ status: res.status, ok: res.ok, data: res.payload }, null, 2) }] };
+    {
+      instructions: SYSTEM_INSTRUCTION,
     }
   );
 
-  server.tool(
-    "contabilium_get_stock",
-    "Consulta existencias de inventario por SKU o por depósito.",
-    {
-      sku: z.string().optional().describe("Código SKU del producto."),
-      idDeposito: z.number().optional().describe("ID del depósito para consultar sus existencias."),
-      timestampNovedades: z.string().optional().describe("Fecha ISO para consultar deltas de inventario."),
-    },
-    async ({ sku, idDeposito, timestampNovedades }) => {
-      let endpoint = "/inventarios/getDepositos";
-      let params = {};
-      if (sku) {
-        endpoint = "/inventarios/getStockBySKU";
-        params = { codigo: sku };
-      } else if (idDeposito !== undefined) {
-        endpoint = "/inventarios/getStockByDeposito";
-        params = { id: idDeposito };
-      } else if (timestampNovedades) {
-        endpoint = "/stock/Novedades";
-        params = { timestamp: timestampNovedades };
-      }
-      const res = await callApi(endpoint, "GET", params);
-      return { content: [{ type: "text", text: JSON.stringify(res.payload, null, 2) }] };
-    }
-  );
+  registerContabiliumTools(server, client);
 
   return server;
 }

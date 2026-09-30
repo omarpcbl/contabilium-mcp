@@ -1,42 +1,64 @@
 # Contabilium MCP Server
 
-Servidor **Model Context Protocol (MCP)** para integrar agentes de IA (Antigravity, Claude Desktop, Cursor, etc.) con la **API Pública de Contabilium** de forma 100% segura.
+Servidor oficial **Model Context Protocol (MCP)** para conectar asistentes de IA (Claude, Antigravity, Cursor, etc.) con la **API de Contabilium** de forma 100% segura y bajo una arquitectura de solo lectura.
 
 ---
 
-## 🔒 Problema que Resuelve: Cero Exposición de Credenciales
+## 🎯 Contexto y Filosofía del MVP (Solo Lectura)
 
-En una integración convencional, tendrías que pegar tu `client_secret` (API Key) o tu Bearer Token en el chat o en el contexto del modelo, lo que representa un riesgo de seguridad y satura la ventana de contexto.
+Este servidor expone **8 tools de solo lectura** sobre endpoints existentes de la API REST de Contabilium. No abre endpoints nuevos en el backend de Contabilium: su objetivo es validar el valor de negocio respondiendo a tres flujos críticos:
+1. **¿Cómo vengo vendiendo?** (`listar_ventas`, `resumen_ventas`)
+2. **¿Qué stock tengo y dónde?** (`buscar_productos`, `listar_depositos`, `stock_por_deposito`)
+3. **¿Quién me debe?** (`buscar_clientes`, `cuentas_por_cobrar`)
 
-Este servidor MCP actúa como una **capa intermedia aislada**:
-1. **Credenciales Ocultas:** `client_secret` vive en tu máquina (en variables de entorno o archivo `.env`). El agente de IA **nunca** lo ve ni puede filtrarlo.
-2. **Ciclo de Vida Automático del Token:** El servidor solicita el `access_token` OAuth2 (`POST /token`), lo mantiene en memoria durante sus 24 horas de vigencia y lo renueva de forma transparente antes de que expire (o ante un error 401).
-3. **Mapeo Multipaís:** Soporta automáticamente Argentina (`rest.contabilium.com`), Chile (`rest.contabilium.cl`) y Uruguay (`rest.contabilium.com.uy`).
-4. **Protección contra 429 (Rate Limit):** Detecta exceso de tasa (25 req/10s) y notifica al agente con diagnósticos claros.
-
----
-
-## 🛠️ Herramientas Expuestas al Agente (Tools)
-
-1. `contabilium_auth_status`
-   - Verifica la validez del token y la conexión sin exponer secretos.
-   - Realiza un ping a `/api/usuarios/obtenerinfo` y reporta: Razón Social, CUIT/RUT, Condición de IVA y estado del token.
-2. `contabilium_get_account_info`
-   - Retorna la configuración completa de la empresa (puntos de venta, estado fiscal, modo QA, etc.).
-3. `contabilium_api_request`
-   - Despachador universal: Permite al agente ejecutar cualquier endpoint (`/api/...`) con método `GET`, `POST`, `PUT` o `DELETE`, inyectando automáticamente la cabecera `Authorization: Bearer <token>`.
-4. `contabilium_get_stock`
-   - Helper de inventario: búsqueda directa por SKU, por ID de depósito o novedades delta por `timestamp`.
-5. `contabilium_search_comprobantes`
-   - Búsqueda de facturas y notas de crédito emitidas por rango de fechas.
+Además, incorpora `registrar_consulta_no_soportada` como instrumento de Product Discovery para capturar las intenciones de usuario no resueltas.
 
 ---
 
-## 🚀 Configuración en Antigravity
+## 🔒 Arquitectura de Seguridad y Privacidad
 
-El servidor se registra en tu archivo global de configuración MCP:
-`C:\Users\Usuario\.gemini\config\mcp_config.json`
+1. **Sin escritura:** El servidor únicamente ejecuta llamadas `GET`. Ninguna tool crea, modifica ni elimina registros.
+2. **Cero fuga de credenciales:** Tus credenciales (`client_id` y `client_secret`) nunca llegan al LLM. En despliegues remotos se transmiten cifradas con **AES-256-GCM** en el parámetro `?auth=...`.
+3. **Gestión autónoma de OAuth2:** Renovación automática de tokens Bearer antes de expirar y reintento transparente ante respuestas 401.
+4. **Rate Limiting Defensivo:** Token bucket integrado (2 req/s, máx 25 req / 10s) con pausas automáticas y reintentos ante 429.
+5. **Normalización Monetaria:** Convierte formatos de moneda argentina (`"40.460,11"`) a números de coma flotante.
+6. **Tope de Paginación:** Hasta 20 páginas (1.000 registros) marcando `truncado: true` cuando se alcanza el límite.
 
+---
+
+## 🛠️ Catálogo de Tools (8 Oficiales + 1 Diagnóstico)
+
+| Tool | Flujo | Descripción |
+|---|---|---|
+| `buscar_clientes` | Catálogo | Busca clientes por nombre, razón social o CUIT. Devuelve IDs necesarios para filtrar ventas y deudas. |
+| `buscar_productos` | Catálogo | Busca productos por SKU o nombre. Devuelve código, precio y stock total consolidado. |
+| `listar_depositos` | Catálogo | Lista los depósitos configurados con sus IDs. Usar antes de consultar stock por depósito. |
+| `listar_ventas` | Ventas | Lista comprobantes de venta emitidos en un período. Máximo 92 días por consulta. |
+| `resumen_ventas` | Ventas | Totaliza ventas por período, agrupables por día, semana, mes o cliente. Resta Notas de Crédito. |
+| `stock_por_deposito` | Stock | Consulta stock actual y reservado de un producto en un depósito específico o en todos. Calcula disponible real. |
+| `cuentas_por_cobrar` | Deuda | Lista comprobantes con saldo pendiente de cobro y totaliza deuda agrupada por cliente. |
+| `registrar_consulta_no_soportada` | Discovery | Registra internamente consultas fuera de alcance para priorizar el backlog de producto. |
+| `contabilium_auth_status` | Diagnóstico | Valida conectividad y reporta Razón Social, CUIT y estado del token. |
+
+---
+
+## 🚀 Despliegue y Conexión
+
+### Opción A: Claude (Streamable HTTP / SSE Remoto)
+El servidor incluye una interfaz web integrada en `/` para generar tu URL segura:
+1. Despliega el proyecto en **Vercel** o **Render**.
+2. Ingresa a la URL de tu despliegue (ej. `https://tu-servidor.vercel.app/`).
+3. Ingresa tu Email de API y tu API Key de Contabilium.
+4. Copia la URL generada:
+   - **Streamable HTTP (Estándar Claude):** `https://tu-servidor.vercel.app/mcp?auth=<TOKEN_CIFRADO>`
+5. En Claude, ve a **Settings > Connectors > Add custom connector**:
+   - **Name:** Contabilium
+   - **MCP server URL:** Pega la URL generada
+   - **Authentication:** `No sign-in (Detected)`
+6. ¡Listo! Claude se conectará a tu cuenta de Contabilium con las 8 herramientas disponibles.
+
+### Opción B: Local (STDIO)
+Ideal para Antigravity, Claude Desktop o Cursor:
 ```json
 {
   "mcpServers": {
@@ -52,6 +74,3 @@ El servidor se registra en tu archivo global de configuración MCP:
   }
 }
 ```
-
-*Alternativa con archivo `.env`:*
-Puedes crear un archivo `.env` dentro de `C:\cbl\contabilium-mcp` a partir de `.env.example` y dejar el objeto `"env": {}` vacío en `mcp_config.json`.
