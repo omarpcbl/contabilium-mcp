@@ -22,7 +22,15 @@ export class ContabiliumClient {
     this.clientSecret = (credentials.clientSecret || process.env.CONTABILIUM_CLIENT_SECRET || "").trim();
     this.country = (credentials.country || process.env.CONTABILIUM_COUNTRY || "AR").toUpperCase();
     this.baseUrl = (credentials.baseUrl || process.env.CONTABILIUM_BASE_URL || COUNTRY_URLS[this.country] || COUNTRY_URLS.AR).replace(/\/+$/, "");
-    this.isParallel = Boolean(credentials.isParallel);
+    
+    // Detección automática del ambiente (por flag explícito, env var o por URL de QA/staging/sandbox)
+    const isQa = Boolean(
+      credentials.isParallel ||
+      process.env.MCP_ENVIRONMENT === "qa" ||
+      /qa|staging|dev|sandbox|test/i.test(this.baseUrl)
+    );
+    this.isParallel = isQa;
+    this.ambiente = isQa ? "QA / Paralelo" : "Producción";
 
     // Estado del token OAuth2
     this.cachedToken = null;

@@ -37,7 +37,7 @@ const client = new ContabiliumClient({
 
 const server = new McpServer(
   {
-    name: "contabilium-mcp",
+    name: client.isParallel ? (process.env.MCP_QA_NAME || "contabilium-mcp-qa") : (process.env.MCP_NAME || "contabilium-mcp"),
     version: "1.0.0",
   },
   {
