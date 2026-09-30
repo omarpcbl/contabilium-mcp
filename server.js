@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 /**
- * Contabilium Remote MCP Server (SSE Transport)
+ * Contabilium Remote Multi-Tenant MCP Server (SSE Transport)
  * 
- * Servidor MCP accesible por URL HTTPS para conectar con Claude Desktop,
- * Claude Web u otros clientes sin requerir instalación local ni Node.js en el cliente.
+ * Permite a CUALQUIER usuario conectar su propia cuenta de Contabilium a Claude
+ * sin necesidad de configurar variables de entorno en el servidor.
  * 
- * Cumple con el estándar SSE de Model Context Protocol:
- * - GET /sse : Inicia la conexión SSE (Server-Sent Events)
- * - POST /messages : Recibe las solicitudes JSON-RPC vinculadas a la sesión
+ * Formas en que un Usuario X envía sus credenciales:
+ * 1. Parámetro 'auth' encriptado/ofuscado en la URL: /sse?auth=<token_base64>
+ * 2. Parámetros query directos: /sse?client_id=...&client_secret=...&country=AR
+ * 3. Headers HTTP (si el cliente los soporta)
+ * 4. Portal Web incorporado en GET / para generar la URL lista para pegar en Claude.
  */
 
 import express from "express";
@@ -20,6 +22,8 @@ dotenv.config();
 
 const PORT = process.env.PORT || 3000;
 const app = express();
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
 
 const COUNTRY_URLS = {
   AR: "https://rest.contabilium.com",
@@ -27,17 +31,60 @@ const COUNTRY_URLS = {
   UY: "https://rest.contabilium.com.uy",
 };
 
-// Mapa de transportes por ID de sesión
+// Mapa de transportes activos por ID de sesión
 const transports = new Map();
 
 /**
- * Función fábrica para crear una instancia de McpServer configurada para una sesión
+ * Helper para extraer credenciales desde query, headers o auth token
  */
-function createMcpServerForSession(credentials = {}) {
-  const clientId = credentials.clientId || process.env.CONTABILIUM_CLIENT_ID;
-  const clientSecret = credentials.clientSecret || process.env.CONTABILIUM_CLIENT_SECRET;
-  const country = (credentials.country || process.env.CONTABILIUM_COUNTRY || "AR").toUpperCase();
-  const baseUrl = credentials.baseUrl || process.env.CONTABILIUM_BASE_URL || COUNTRY_URLS[country] || COUNTRY_URLS.AR;
+function extractUserCredentials(req) {
+  // 1. Si viene un token 'auth' codificado en Base64Url
+  if (req.query.auth) {
+    try {
+      const decoded = Buffer.from(req.query.auth, "base64url").toString("utf8");
+      const parsed = JSON.parse(decoded);
+      return {
+        clientId: parsed.clientId || parsed.client_id,
+        clientSecret: parsed.clientSecret || parsed.client_secret,
+        country: (parsed.country || "AR").toUpperCase(),
+      };
+    } catch (e) {
+      console.error("[Auth] Error decodificando token auth:", e.message);
+    }
+  }
+
+  // 2. Si vienen por Query String directo
+  if (req.query.client_id && req.query.client_secret) {
+    return {
+      clientId: req.query.client_id,
+      clientSecret: req.query.client_secret,
+      country: (req.query.country || "AR").toUpperCase(),
+    };
+  }
+
+  // 3. Si vienen por Headers HTTP
+  if (req.headers["x-contabilium-client-id"] && req.headers["x-contabilium-client-secret"]) {
+    return {
+      clientId: req.headers["x-contabilium-client-id"],
+      clientSecret: req.headers["x-contabilium-client-secret"],
+      country: (req.headers["x-contabilium-country"] || "AR").toUpperCase(),
+    };
+  }
+
+  // 4. Fallback a variables del servidor (modo mono-empresa)
+  return {
+    clientId: process.env.CONTABILIUM_CLIENT_ID,
+    clientSecret: process.env.CONTABILIUM_CLIENT_SECRET,
+    country: (process.env.CONTABILIUM_COUNTRY || "AR").toUpperCase(),
+  };
+}
+
+/**
+ * Fábrica de servidor MCP aislado por sesión de usuario
+ */
+function createMcpServerForSession(credentials) {
+  const { clientId, clientSecret, country = "AR" } = credentials;
+  const baseUrl = COUNTRY_URLS[country] || COUNTRY_URLS.AR;
 
   let cachedToken = null;
   let tokenExpiresAt = 0;
@@ -52,11 +99,11 @@ function createMcpServerForSession(credentials = {}) {
 
     if (!clientId || !clientSecret) {
       throw new Error(
-        "Credenciales no encontradas. Configura CONTABILIUM_CLIENT_ID y CONTABILIUM_CLIENT_SECRET en el servidor o envíalas en los headers HTTP."
+        "Credenciales no encontradas para tu sesión. Conecta Claude usando una URL que contenga tu parámetro auth generado en el portal del servidor."
       );
     }
 
-    const tokenUrl = `${baseUrl.replace(/\/+$/, "")}/token`;
+    const tokenUrl = `${baseUrl}/token`;
     const bodyParams = new URLSearchParams({
       grant_type: "client_credentials",
       client_id: clientId.trim(),
@@ -74,7 +121,7 @@ function createMcpServerForSession(credentials = {}) {
 
     if (!response.ok) {
       const errText = await response.text();
-      throw new Error(`Error de autenticación (${response.status}): ${errText}`);
+      throw new Error(`Error de autenticación en Contabilium (${response.status}): ${errText}`);
     }
 
     const data = await response.json();
@@ -91,7 +138,7 @@ function createMcpServerForSession(credentials = {}) {
       cleanEndpoint = `/api${cleanEndpoint}`;
     }
 
-    const url = new URL(`${baseUrl.replace(/\/+$/, "")}${cleanEndpoint}`);
+    const url = new URL(`${baseUrl}${cleanEndpoint}`);
     if (params) {
       for (const [k, v] of Object.entries(params)) {
         if (v !== undefined && v !== null) url.searchParams.append(k, String(v));
@@ -125,10 +172,10 @@ function createMcpServerForSession(credentials = {}) {
     version: "1.0.0",
   });
 
-  // Tools
+  // Tool 1: Estado y Salud
   server.tool(
     "contabilium_auth_status",
-    "Verifica el estado del token y conectividad con Contabilium.",
+    "Verifica el estado del token y conectividad con tu cuenta de Contabilium.",
     { ping: z.boolean().default(true) },
     async ({ ping }) => {
       let masked = "NO_CONFIGURADO";
@@ -164,9 +211,10 @@ function createMcpServerForSession(credentials = {}) {
     }
   );
 
+  // Tool 2: Información de Cuenta
   server.tool(
     "contabilium_get_account_info",
-    "Obtiene configuración y datos fiscales de la cuenta.",
+    "Obtiene la configuración y datos fiscales de la cuenta en Contabilium.",
     {},
     async () => {
       const res = await callApi("/usuarios/obtenerinfo", "GET");
@@ -174,9 +222,10 @@ function createMcpServerForSession(credentials = {}) {
     }
   );
 
+  // Tool 3: Request General
   server.tool(
     "contabilium_api_request",
-    "Ejecuta llamadas autorizadas a la API de Contabilium.",
+    "Ejecuta llamadas autorizadas contra cualquier endpoint de la API de Contabilium.",
     {
       endpoint: z.string(),
       method: z.enum(["GET", "POST", "PUT", "DELETE"]).default("GET"),
@@ -189,6 +238,7 @@ function createMcpServerForSession(credentials = {}) {
     }
   );
 
+  // Tool 4: Stock
   server.tool(
     "contabilium_get_stock",
     "Consulta existencias de inventario por SKU o por depósito.",
@@ -219,24 +269,115 @@ function createMcpServerForSession(credentials = {}) {
 }
 
 // -------------------------------------------------------------
-// Rutas HTTP
+// Portal Web para que Usuario X genere su URL para Claude
 // -------------------------------------------------------------
+app.get("/", (req, res) => {
+  const host = req.get("host");
+  const protocol = req.protocol === "https" || req.get("x-forwarded-proto") === "https" ? "https" : "http";
+  const baseUrl = `${protocol}://${host}`;
 
-// Healthcheck
-app.get("/health", (req, res) => {
-  res.json({ status: "ok", service: "contabilium-mcp-remote", version: "1.0.0" });
+  res.send(`
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Conector Claude MCP - Contabilium</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #0f172a; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
+    .card { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 32px; max-width: 520px; width: 100%; box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3); }
+    h1 { font-size: 22px; margin-top: 0; color: #38bdf8; display: flex; align-items: center; gap: 8px; }
+    p { font-size: 14px; color: #94a3b8; line-height: 1.5; }
+    label { font-size: 13px; font-weight: 600; display: block; margin-top: 16px; margin-bottom: 6px; color: #e2e8f0; }
+    input, select { width: 100%; padding: 10px 12px; background: #0f172a; border: 1px solid #475569; border-radius: 8px; color: #fff; font-size: 14px; box-sizing: border-box; }
+    input:focus, select:focus { outline: none; border-color: #38bdf8; ring: 2px solid #38bdf8; }
+    button { width: 100%; margin-top: 24px; padding: 12px; background: #0284c7; color: #fff; border: none; border-radius: 8px; font-weight: 600; font-size: 15px; cursor: pointer; transition: background 0.2s; }
+    button:hover { background: #0369a1; }
+    .result { display: none; margin-top: 24px; background: #0f172a; border: 1px dashed #38bdf8; border-radius: 8px; padding: 16px; }
+    .result label { margin-top: 0; color: #38bdf8; }
+    .url-box { word-break: break-all; font-family: monospace; font-size: 13px; color: #a5f3fc; background: #1e293b; padding: 10px; border-radius: 6px; margin: 8px 0; border: 1px solid #334155; }
+    .copy-btn { width: auto; padding: 8px 16px; font-size: 13px; background: #334155; margin-top: 6px; }
+    .copy-btn:hover { background: #475569; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1><span>⚡</span> Conectar Contabilium con Claude</h1>
+    <p>Genera tu enlace personalizado para agregar a Claude como <strong>Custom Connector MCP</strong> sin exponer tus credenciales en el chat.</p>
+
+    <form id="setupForm">
+      <label for="clientId">Email de API de Contabilium (client_id)</label>
+      <input type="email" id="clientId" placeholder="ejemplo@tuempresa.com" required>
+
+      <label for="clientSecret">API Key Privada (client_secret)</label>
+      <input type="password" id="clientSecret" placeholder="Tu API Key de Contabilium" required>
+
+      <label for="country">País de radicación</label>
+      <select id="country">
+        <option value="AR">Argentina (AFIP)</option>
+        <option value="CL">Chile (SII)</option>
+        <option value="UY">Uruguay (DGI)</option>
+      </select>
+
+      <button type="submit">Generar URL para Claude</button>
+    </form>
+
+    <div class="result" id="resultBox">
+      <label>Tu URL para el conector de Claude:</label>
+      <div class="url-box" id="generatedUrl"></div>
+      <button type="button" class="copy-btn" onclick="copyUrl()">Copiar URL</button>
+      <p style="font-size: 12px; margin-top: 12px; color: #64748b;">
+        👉 En Claude: pega esta URL en el campo <strong>"MCP server URL"</strong> de la ventana "Add custom connector".
+      </p>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById("setupForm");
+    const resultBox = document.getElementById("resultBox");
+    const generatedUrl = document.getElementById("generatedUrl");
+    const baseUrl = "${baseUrl}";
+
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const clientId = document.getElementById("clientId").value.trim();
+      const clientSecret = document.getElementById("clientSecret").value.trim();
+      const country = document.getElementById("country").value;
+
+      const payload = { clientId, clientSecret, country };
+      const rawString = JSON.stringify(payload);
+      
+      // Codificar en Base64Url
+      const base64 = btoa(unescape(encodeURIComponent(rawString)))
+        .replace(/\\+/g, '-')
+        .replace(/\\//g, '_')
+        .replace(/=+$/, '');
+
+      const finalUrl = baseUrl + "/sse?auth=" + base64;
+      generatedUrl.innerText = finalUrl;
+      resultBox.style.display = "block";
+    });
+
+    function copyUrl() {
+      navigator.clipboard.writeText(generatedUrl.innerText);
+      alert("¡URL copiada al portapapeles! Pégala en Claude.");
+    }
+  </script>
+</body>
+</html>
+  `);
 });
 
-// Endpoint SSE
+// Endpoint SSE (Multi-Tenant)
 app.get("/sse", async (req, res) => {
-  console.log(`[SSE] Nueva conexión entrante desde ${req.ip}`);
+  const credentials = extractUserCredentials(req);
 
-  // Permitir credenciales por cabeceras HTTP si es multi-tenant
-  const credentials = {
-    clientId: req.headers["x-contabilium-client-id"],
-    clientSecret: req.headers["x-contabilium-client-secret"],
-    country: req.headers["x-contabilium-country"],
-  };
+  if (!credentials.clientId || !credentials.clientSecret) {
+    res.status(400).send("Faltan credenciales de Contabilium. Proporciona el parámetro auth generado en el portal.");
+    return;
+  }
+
+  console.log(`[SSE] Nueva sesión para usuario: ${credentials.clientId.slice(0, 3)}*** (${credentials.country})`);
 
   const transport = new SSEServerTransport("/messages", res);
   const server = createMcpServerForSession(credentials);
@@ -244,7 +385,7 @@ app.get("/sse", async (req, res) => {
   transports.set(transport.sessionId, transport);
 
   req.on("close", () => {
-    console.log(`[SSE] Conexión cerrada para sesión ${transport.sessionId}`);
+    console.log(`[SSE] Sesión cerrada: ${transport.sessionId}`);
     transports.delete(transport.sessionId);
   });
 
@@ -265,6 +406,5 @@ app.post("/messages", async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`🚀 Contabilium Remote MCP Server corriendo en http://localhost:${PORT}`);
-  console.log(`📡 Endpoint SSE para Claude: http://localhost:${PORT}/sse`);
+  console.log(`🚀 Contabilium Remote MCP Server corriendo en el puerto ${PORT}`);
 });
