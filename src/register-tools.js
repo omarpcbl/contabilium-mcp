@@ -208,8 +208,27 @@ export function registerContabiliumTools(server, client) {
 
         return { content: [{ type: "text", text: JSON.stringify(report, null, 2) }] };
       } catch (err) {
+        let sugerencia = "Revisa la conectividad de red hacia la URL Base configurada.";
+        const msg = err.message || "";
+        if (msg.includes("CERT") || msg.includes("certificate") || msg.includes("self-signed")) {
+          sugerencia = "Certificado SSL no reconocido por Node.js. Agrega CONTABILIUM_IGNORE_SSL: 'true' en las variables de entorno de tu conector.";
+        } else if (msg.includes("ENOTFOUND")) {
+          sugerencia = "El dominio no pudo resolverse por DNS. Verifica si la VPN de QA está activa y conectada.";
+        } else if (msg.includes("ECONNREFUSED") || msg.includes("ETIMEDOUT") || msg.includes("ConnectTimeoutError")) {
+          sugerencia = "Conexión rechazada o expirada. Verifica que la VPN esté conectada y que el host/puerto sean accesibles.";
+        }
+
         return {
-          content: [{ type: "text", text: JSON.stringify({ conectado: false, error: err.message }, null, 2) }],
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              conectado: false,
+              ambiente: client.isParallel ? "QA / Paralelo" : "Producción",
+              urlIntentada: client.baseUrl,
+              error: err.message,
+              diagnostico: sugerencia
+            }, null, 2)
+          }],
           isError: true,
         };
       }

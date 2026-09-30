@@ -80,14 +80,25 @@ export class ContabiliumClient {
       client_secret: this.clientSecret,
     });
 
-    const response = await fetch(tokenUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded",
-        Accept: "application/json",
-      },
-      body: bodyParams.toString(),
-    });
+    if (process.env.CONTABILIUM_IGNORE_SSL === "true" || process.env.NODE_TLS_REJECT_UNAUTHORIZED === "0") {
+      process.env.NODE_TLS_REJECT_UNAUTHORIZED = "0";
+    }
+
+    let response;
+    try {
+      response = await fetch(tokenUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          Accept: "application/json",
+        },
+        body: bodyParams.toString(),
+      });
+    } catch (netErr) {
+      const cause = netErr.cause;
+      const causeDetail = cause ? ` [Causa: ${cause.code || cause.message || cause}]` : "";
+      throw new Error(`Error de red al conectar con el endpoint de autenticación (${tokenUrl}): ${netErr.message}${causeDetail}`);
+    }
 
     if (!response.ok) {
       const errText = await response.text();
@@ -170,7 +181,9 @@ export class ContabiliumClient {
           },
         });
       } catch (netErr) {
-        throw new Error(`Error de red al conectar con Contabilium: ${netErr.message}`);
+        const cause = netErr.cause;
+        const causeDetail = cause ? ` [Causa: ${cause.code || cause.message || cause}]` : "";
+        throw new Error(`Error de red al conectar con Contabilium (${url.toString()}): ${netErr.message}${causeDetail}`);
       }
 
       if (res.status === 401 && retryOn401) {
