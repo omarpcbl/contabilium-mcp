@@ -1,18 +1,19 @@
 #!/usr/bin/env node
 /**
- * Contabilium Remote Multi-Tenant MCP Server (SSE Transport)
+ * Contabilium Remote Multi-Tenant MCP Server
  * 
- * Implementación con Cifrado Militar AES-256-GCM:
- * - Las credenciales del Usuario X se cifran con la clave maestra privada del servidor.
- * - Lo que viaja en la URL de Claude es un bloque criptográfico indescifrable (IV + Ciphertext + AuthTag).
- * - Cero texto plano, cero fugas en logs de Render/proxies o bases de datos de Claude.
- * - Portal Web integrado en GET / para validar credenciales y generar la URL lista para Claude.
+ * Soporta dos transportes de Model Context Protocol:
+ * 1. Streamable HTTP (/mcp) : El NUEVO estándar moderno 2026 recomendado por Claude y Vercel (sin avisos de deprecación).
+ * 2. Server-Sent Events (/sse) : Transporte legacy retrocompatible.
+ * 
+ * Seguridad: Cifrado Militar AES-256-GCM para aislar credenciales sin exponerlas al LLM.
  */
 
 import express from "express";
 import crypto from "crypto";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { SSEServerTransport } from "@modelcontextprotocol/sdk/server/sse.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 import dotenv from "dotenv";
 
@@ -35,10 +36,6 @@ const COUNTRY_URLS = {
 const ENCRYPTION_PASSPHRASE = process.env.ENCRYPTION_SECRET || "contabilium-mcp-secure-master-key-2026-default";
 const MASTER_KEY = crypto.scryptSync(ENCRYPTION_PASSPHRASE, "cbl-salt-mcp-gcm-2026", 32);
 
-/**
- * Cifra un payload con AES-256-GCM
- * Retorna formato: <iv_base64url>.<ciphertext_base64url>.<authTag_base64url>
- */
 function encryptPayload(data) {
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv("aes-256-gcm", MASTER_KEY, iv);
@@ -49,9 +46,6 @@ function encryptPayload(data) {
   return `${iv.toString("base64url")}.${encrypted}.${authTag}`;
 }
 
-/**
- * Descifra y valida la autenticidad del token con AES-256-GCM
- */
 function decryptPayload(token) {
   try {
     const parts = token.split(".");
@@ -74,14 +68,14 @@ function decryptPayload(token) {
   }
 }
 
-// Mapa de transportes activos por ID de sesión
-const transports = new Map();
+// Mapa de transportes SSE por ID de sesión
+const sseTransports = new Map();
 
 /**
  * Extrae y valida credenciales del request entrante
  */
 function extractUserCredentials(req) {
-  // 1. Token cifrado AES-256-GCM en el query string
+  // 1. Token cifrado AES-256-GCM en el query string (?auth=...)
   if (req.query.auth) {
     const decrypted = decryptPayload(req.query.auth);
     if (decrypted && decrypted.clientId && decrypted.clientSecret) {
@@ -305,7 +299,6 @@ app.post("/api/generate-token", async (req, res) => {
 
   const baseUrl = COUNTRY_URLS[country.toUpperCase()] || COUNTRY_URLS.AR;
 
-  // 1. Validar las credenciales en vivo contra Contabilium antes de generar la URL
   try {
     const tokenUrl = `${baseUrl}/token`;
     const bodyParams = new URLSearchParams({
@@ -331,7 +324,6 @@ app.post("/api/generate-token", async (req, res) => {
     const authData = await authRes.json();
     const token = authData.access_token;
 
-    // Obtener razón social para confirmar conexión exitosa
     let razonSocial = "Empresa Verificada";
     let cuit = "";
     try {
@@ -344,10 +336,9 @@ app.post("/api/generate-token", async (req, res) => {
         cuit = infoData.CUIT || "";
       }
     } catch {
-      // Omitir si falla info
+      // Ignorar fallo de info
     }
 
-    // 2. Cifrar con AES-256-GCM
     const cipherToken = encryptPayload({
       clientId: clientId.trim(),
       clientSecret: clientSecret.trim(),
@@ -357,11 +348,16 @@ app.post("/api/generate-token", async (req, res) => {
 
     const host = req.get("host");
     const protocol = req.protocol === "https" || req.get("x-forwarded-proto") === "https" ? "https" : "http";
-    const claudeUrl = `${protocol}://${host}/sse?auth=${cipherToken}`;
+    
+    // URL moderna Streamable HTTP (/mcp) recomendada por Claude
+    const mcpUrl = `${protocol}://${host}/mcp?auth=${cipherToken}`;
+    // URL legacy SSE (/sse)
+    const sseUrl = `${protocol}://${host}/sse?auth=${cipherToken}`;
 
     return res.json({
       ok: true,
-      url: claudeUrl,
+      url: mcpUrl,
+      sseUrl,
       empresa: razonSocial,
       cuit,
       pais: country.toUpperCase(),
@@ -384,9 +380,9 @@ app.get("/", (req, res) => {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background: #0b0f19; color: #f8fafc; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; padding: 20px; }
-    .card { background: #131c2e; border: 1px solid #1e293b; border-radius: 14px; padding: 36px; max-width: 540px; width: 100%; box-shadow: 0 20px 40px -15px rgba(0,0,0,0.5); }
+    .card { background: #131c2e; border: 1px solid #1e293b; border-radius: 14px; padding: 36px; max-width: 560px; width: 100%; box-shadow: 0 20px 40px -15px rgba(0,0,0,0.5); }
     h1 { font-size: 22px; margin-top: 0; color: #38bdf8; display: flex; align-items: center; gap: 10px; }
-    .badge { background: #0369a1; color: #e0f2fe; font-size: 11px; padding: 3px 8px; border-radius: 999px; font-weight: 700; text-transform: uppercase; }
+    .badge { background: #0284c7; color: #e0f2fe; font-size: 11px; padding: 3px 8px; border-radius: 999px; font-weight: 700; text-transform: uppercase; }
     p { font-size: 14px; color: #94a3b8; line-height: 1.5; margin-bottom: 20px; }
     label { font-size: 13px; font-weight: 600; display: block; margin-top: 16px; margin-bottom: 6px; color: #cbd5e1; }
     input, select { width: 100%; padding: 11px 14px; background: #0b0f19; border: 1px solid #334155; border-radius: 8px; color: #fff; font-size: 14px; box-sizing: border-box; }
@@ -405,8 +401,8 @@ app.get("/", (req, res) => {
 </head>
 <body>
   <div class="card">
-    <h1><span>🔒</span> Conector Seguro Claude MCP <span class="badge">AES-256</span></h1>
-    <p>Conecta tu cuenta de Contabilium con Claude sin exponer tus credenciales en el chat ni en los servidores de Anthropic.</p>
+    <h1><span>🔒</span> Conector Claude MCP <span class="badge">Streamable HTTP</span></h1>
+    <p>Conecta tu cuenta de Contabilium con Claude usando el <strong>nuevo estándar Streamable HTTP</strong> de Anthropic con cifrado AES-256-GCM.</p>
 
     <form id="setupForm">
       <label for="clientId">Email de API de Contabilium (client_id)</label>
@@ -422,7 +418,7 @@ app.get("/", (req, res) => {
         <option value="UY">Uruguay (DGI)</option>
       </select>
 
-      <button type="submit" id="submitBtn">Verificar y Generar Conector Seguro</button>
+      <button type="submit" id="submitBtn">Verificar y Generar Conector para Claude</button>
     </form>
 
     <div class="alert-error" id="errorBox"></div>
@@ -431,17 +427,17 @@ app.get("/", (req, res) => {
       <div class="result-header">✅ Cuenta Verificada con Éxito</div>
       <div style="font-size: 13px; color: #94a3b8; margin-bottom: 12px;" id="companyInfo"></div>
       
-      <label style="color: #38bdf8; font-size: 12px;">Tu URL Cifrada para Claude (Cero Texto Plano):</label>
+      <label style="color: #38bdf8; font-size: 12px;">URL Streamable HTTP (Estándar Moderno sin avisos de deprecación):</label>
       <div class="url-box" id="generatedUrl"></div>
       <button type="button" class="copy-btn" onclick="copyUrl()">Copiar URL</button>
       
       <p style="font-size: 12px; margin-top: 14px; color: #94a3b8;">
-        👉 En Claude: pega esta URL en el campo <strong>"MCP server URL"</strong> de la ventana "Add custom connector".
+        👉 Pega esta URL en el campo <strong>"MCP server URL"</strong> de la ventana "Add custom connector" en Claude.
       </p>
     </div>
 
     <div class="security-note">
-      🛡️ <strong>Garantía Criptográfica:</strong> Tu API Key se cifra mediante <strong>AES-256-GCM</strong>. Ni Claude, ni los logs de internet pueden leer tus credenciales. Solo este servidor MCP puede descifrarlas en memoria durante la sesión activa.
+      🛡️ <strong>Protocolo 2026:</strong> Utiliza el nuevo transporte <em>Streamable HTTP</em> (`/mcp`) recomendado por Anthropic, totalmente stateless y optimizado para Serverless (Vercel). Tus claves se cifran con AES-256-GCM.
     </div>
   </div>
 
@@ -486,7 +482,7 @@ app.get("/", (req, res) => {
         errorBox.style.display = "block";
       } finally {
         submitBtn.disabled = false;
-        submitBtn.innerText = "Verificar y Generar Conector Seguro";
+        submitBtn.innerText = "Verificar y Generar Conector para Claude";
       }
     });
 
@@ -501,7 +497,32 @@ app.get("/", (req, res) => {
 });
 
 // -------------------------------------------------------------
-// Endpoint SSE (Multi-Tenant Cifrado)
+// 1. TRANSPORTE MODERNO: Streamable HTTP (/mcp)
+// El estándar actual de Claude y Vercel (Reemplazo oficial de SSE)
+// -------------------------------------------------------------
+app.all("/mcp", async (req, res) => {
+  const credentials = extractUserCredentials(req);
+
+  if (!credentials) {
+    res.status(401).json({ error: "No autorizado: Falta el parámetro auth cifrado o es inválido." });
+    return;
+  }
+
+  try {
+    const transport = new StreamableHTTPServerTransport({});
+    const server = createMcpServerForSession(credentials);
+    await server.connect(transport);
+    await transport.handleRequest(req, res, req.body);
+  } catch (err) {
+    console.error("[StreamableHTTP] Error procesando request:", err);
+    if (!res.headersSent) {
+      res.status(500).json({ error: err.message });
+    }
+  }
+});
+
+// -------------------------------------------------------------
+// 2. TRANSPORTE RETROCOMPATIBLE: Server-Sent Events (/sse)
 // -------------------------------------------------------------
 app.get("/sse", async (req, res) => {
   const credentials = extractUserCredentials(req);
@@ -511,39 +532,37 @@ app.get("/sse", async (req, res) => {
     return;
   }
 
-  console.log(`[SSE] Nueva sesión autenticada (AES-256) para: ${credentials.clientId.slice(0, 3)}*** (${credentials.country})`);
-
   const transport = new SSEServerTransport("/messages", res);
   const server = createMcpServerForSession(credentials);
 
-  transports.set(transport.sessionId, transport);
+  sseTransports.set(transport.sessionId, transport);
 
   req.on("close", () => {
-    console.log(`[SSE] Sesión cerrada: ${transport.sessionId}`);
-    transports.delete(transport.sessionId);
+    sseTransports.delete(transport.sessionId);
   });
 
   await server.connect(transport);
 });
 
-// Endpoint de Mensajes JSON-RPC
 app.post("/messages", async (req, res) => {
   const sessionId = req.query.sessionId;
-  const transport = transports.get(sessionId);
+  const transport = sseTransports.get(sessionId);
 
   if (!transport) {
-    res.status(404).send("Sesión no encontrada o expirada");
+    res.status(404).send("Sesión SSE no encontrada o expirada");
     return;
   }
 
   await transport.handlePostMessage(req, res);
 });
 
+// Arrancar en standalone si no corre en Vercel Serverless
 if (!process.env.VERCEL) {
   app.listen(PORT, () => {
-    console.log(`🚀 Contabilium Remote MCP Server (AES-256-GCM) corriendo en el puerto ${PORT}`);
+    console.log(`🚀 Contabilium MCP Server activo en puerto ${PORT}`);
+    console.log(`✨ Streamable HTTP (Estándar Claude): http://localhost:${PORT}/mcp`);
+    console.log(`📡 Legacy SSE: http://localhost:${PORT}/sse`);
   });
 }
 
 export default app;
-
