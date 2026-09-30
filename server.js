@@ -989,13 +989,13 @@ app.get("/", (req, res) => {
       <div class="form-group">
         <label class="field-label" for="country">
           <span class="material-symbols-outlined" aria-hidden="true">public</span>
-          País de radicación fiscal
+          País
         </label>
         <div class="input-container">
-          <select id="country" aria-label="Selecciona el país de radicación fiscal">
-            <option value="AR">Argentina (AFIP)</option>
-            <option value="CL">Chile (SII)</option>
-            <option value="UY">Uruguay (DGI)</option>
+          <select id="country" aria-label="Selecciona tu país">
+            <option value="AR">Argentina</option>
+            <option value="CL">Chile</option>
+            <option value="UY">Uruguay</option>
           </select>
           <span class="material-symbols-outlined select-arrow" aria-hidden="true">expand_more</span>
         </div>
