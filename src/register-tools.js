@@ -1,5 +1,6 @@
 import * as buscarClientes from "./tools/buscar_clientes.js";
 import * as buscarProductos from "./tools/buscar_productos.js";
+import * as buscarProveedores from "./tools/buscar_proveedores.js";
 import * as listarDepositos from "./tools/listar_depositos.js";
 import * as listarVentas from "./tools/listar_ventas.js";
 import * as resumenVentas from "./tools/resumen_ventas.js";
@@ -9,8 +10,7 @@ import * as registrarConsultaNoSoportada from "./tools/registrar_consulta_no_sop
 import { z } from "zod";
 
 /**
- * Registra las 8 herramientas oficiales del MVP de solo lectura de Contabilium
- * según la especificación "MCP Contabilium — Diseño de tools (MVP solo lectura)".
+ * Registra las herramientas del servidor MCP de Contabilium
  * 
  * @param {import("@modelcontextprotocol/sdk/server/mcp.js").McpServer} server 
  * @param {import("./contabilium-client.js").ContabiliumClient} client 
@@ -36,7 +36,7 @@ export function registerContabiliumTools(server, client) {
   // 2. buscar_productos
   server.tool(
     "buscar_productos",
-    "Busca productos por SKU o nombre. Devuelve código, precio y stock total consolidado.",
+    "Busca productos por SKU o nombre. Devuelve código, descripción, precio de venta, stock total consolidado, costo_interno (utilizado como costo de compra habitual ante proveedores) y proveedor asignado.",
     buscarProductos.schema,
     async (args) => {
       try {
@@ -50,7 +50,24 @@ export function registerContabiliumTools(server, client) {
     }
   );
 
-  // 3. listar_depositos
+  // 3. buscar_proveedores
+  server.tool(
+    "buscar_proveedores",
+    "Busca proveedores por razón social, nombre de fantasía o CUIT. Devuelve datos de contacto para reposición y compras.",
+    buscarProveedores.schema,
+    async (args) => {
+      try {
+        return await buscarProveedores.handler(args, client);
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ error: err.message, datos: [], resumen: "Error en la consulta", advertencias: [err.message], truncado: false }, null, 2) }],
+          isError: true,
+        };
+      }
+    }
+  );
+
+  // 4. listar_depositos
   server.tool(
     "listar_depositos",
     "Lista los depósitos configurados con sus IDs. Usar antes de consultar stock por depósito.",
@@ -67,7 +84,7 @@ export function registerContabiliumTools(server, client) {
     }
   );
 
-  // 4. listar_ventas
+  // 5. listar_ventas
   server.tool(
     "listar_ventas",
     "Lista comprobantes de venta emitidos en un período. Máximo 92 días por consulta.",
@@ -84,7 +101,7 @@ export function registerContabiliumTools(server, client) {
     }
   );
 
-  // 5. resumen_ventas
+  // 6. resumen_ventas
   server.tool(
     "resumen_ventas",
     "Totaliza ventas por período, agrupables por día, semana, mes o cliente. Calcula totales facturados y cantidad de operaciones.",
@@ -101,7 +118,7 @@ export function registerContabiliumTools(server, client) {
     }
   );
 
-  // 6. stock_por_deposito
+  // 7. stock_por_deposito
   server.tool(
     "stock_por_deposito",
     "Consulta stock actual y reservado de un producto en un depósito específico o en todos.",
@@ -118,7 +135,7 @@ export function registerContabiliumTools(server, client) {
     }
   );
 
-  // 7. cuentas_por_cobrar
+  // 8. cuentas_por_cobrar
   server.tool(
     "cuentas_por_cobrar",
     "Lista comprobantes con saldo pendiente de cobro y totaliza la deuda agrupada por cliente.",
@@ -135,7 +152,7 @@ export function registerContabiliumTools(server, client) {
     }
   );
 
-  // 8. registrar_consulta_no_soportada
+  // 9. registrar_consulta_no_soportada
   server.tool(
     "registrar_consulta_no_soportada",
     "Registra internamente una consulta que el MCP no pudo responder por falta de datos o endpoint. Usar de forma transparente cuando el usuario pida algo fuera del alcance.",

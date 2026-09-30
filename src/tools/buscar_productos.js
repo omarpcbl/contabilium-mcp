@@ -1,6 +1,24 @@
 import { z } from "zod";
 import { formatToolResponse, parseAmount } from "../utils.js";
 
+// Caché en memoria para nombres de proveedores (ID -> Nombre)
+const providerNameCache = new Map();
+
+async function getProviderName(client, id) {
+  if (!id || Number(id) <= 0) return null;
+  const numId = Number(id);
+  if (providerNameCache.has(numId)) return providerNameCache.get(numId);
+
+  try {
+    const prov = await client.get(`/proveedores/obtener?id=${numId}`, null, 1800);
+    const name = prov?.RazonSocial || prov?.NombreFantasia || `Proveedor #${numId}`;
+    providerNameCache.set(numId, name);
+    return name;
+  } catch {
+    return null;
+  }
+}
+
 export const schema = {
   texto: z.string().describe("Código SKU o nombre del producto/servicio."),
   rubro: z.string().optional().describe("Nombre del rubro para filtrar (opcional)."),
@@ -19,7 +37,7 @@ export async function handler({ texto, rubro, limite }, client) {
     }
   }
 
-  // 2. Buscar conceptos
+  // 2. Buscar conceptos en la API
   const res = await client.get("/conceptos/search", { pageSize: 50, filtro: texto.trim() }, 300);
 
   let items = [];
@@ -48,33 +66,48 @@ export async function handler({ texto, rubro, limite }, client) {
 
   const sliced = filtered.slice(0, limite);
 
-  const datos = sliced.map((p) => {
-    const idRubro = Number(p.IdRubro || p.idRubro);
-    const rubroNombre = rubrosMap.get(idRubro) || p.Rubro || "Sin rubro";
+  // 3. Resolver nombres de proveedores concurrentemente
+  const datos = await Promise.all(
+    sliced.map(async (p) => {
+      const idRubro = Number(p.IdRubro || p.idRubro);
+      const rubroNombre = rubrosMap.get(idRubro) || p.Rubro || "Sin rubro";
 
-    // Tipo: P (Producto), S (Servicio), C (Combo)
-    let tipo = p.Tipo || "P";
-    if (typeof tipo === "number") {
-      tipo = tipo === 1 ? "P" : tipo === 2 ? "S" : "C";
-    }
+      // Tipo: P (Producto), S (Servicio), C (Combo)
+      let tipo = p.Tipo || "P";
+      if (typeof tipo === "number") {
+        tipo = tipo === 1 ? "P" : tipo === 2 ? "S" : "C";
+      }
 
-    return {
-      id: p.Id ?? p.id,
-      codigo: p.Codigo || p.codigo || "",
-      nombre: p.Nombre || p.nombre || "Sin nombre",
-      tipo: String(tipo).toUpperCase(),
-      precio: parseAmount(p.Precio ?? p.precio ?? p.PrecioFinal ?? 0),
-      stock_total: parseAmount(p.StockTotal ?? p.stockTotal ?? p.StockActual ?? p.Stock ?? 0),
-      rubro: rubroNombre,
-    };
-  });
+      const idProveedor = p.IDProveedor ?? p.IdProveedor ?? p.idProveedor ?? p.IDPersona ?? p.idPersona ?? null;
+      const proveedorNombre = idProveedor ? await getProviderName(client, idProveedor) : null;
+      const codigoProveedor = p.CodigoProveedor ?? p.codigoProveedor ?? "";
+
+      return {
+        id: p.Id ?? p.id,
+        codigo: p.Codigo || p.codigo || "",
+        nombre: p.Nombre || p.nombre || "Sin nombre",
+        descripcion: p.Descripcion || p.descripcion || "",
+        tipo: String(tipo).toUpperCase(),
+        precio: parseAmount(p.Precio ?? p.precio ?? p.PrecioFinal ?? 0),
+        costo_interno: parseAmount(p.CostoInterno ?? p.costoInterno ?? 0),
+        stock_total: parseAmount(p.StockTotal ?? p.stockTotal ?? p.StockActual ?? p.Stock ?? 0),
+        rubro: rubroNombre,
+        id_proveedor: idProveedor ? Number(idProveedor) : null,
+        codigo_proveedor: codigoProveedor,
+        proveedor: proveedorNombre,
+      };
+    })
+  );
 
   const resumen = `Se encontraron ${datos.length} producto(s) para "${texto}"${rubro ? ` en el rubro "${rubro}"` : ""}.`;
 
   return formatToolResponse({
     datos,
     resumen,
-    advertencias: ["stock_total suma todos los depósitos (API-1267). Para stock por depósito, usar stock_por_deposito."],
+    advertencias: [
+      "stock_total suma todos los depósitos (API-1267). Para stock por depósito, usar stock_por_deposito.",
+      "costo_interno representa el costo interno asignado al producto en Contabilium (utilizado como costo de compra / reposición).",
+    ],
     truncado: filtered.length > limite,
   });
 }
