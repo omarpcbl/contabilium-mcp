@@ -1,0 +1,30 @@
+{
+  "name": "contabilium-mcp",
+  "version": "1.0.0",
+  "description": "Servidor MCP (Stdio y SSE Remoto) para integración segura con la API Pública de Contabilium sin exponer credenciales al LLM",
+  "main": "index.js",
+  "type": "module",
+  "bin": {
+    "contabilium-mcp": "./index.js"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "stdio": "node index.js"
+  },
+  "keywords": [
+    "contabilium",
+    "mcp",
+    "api",
+    "oauth2",
+    "sse",
+    "claude"
+  ],
+  "author": "Contabilium Integrations",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.27.0",
+    "dotenv": "^16.4.7",
+    "express": "^5.1.0",
+    "zod": "^3.24.2"
+  }
+}
