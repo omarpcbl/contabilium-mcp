@@ -19,6 +19,7 @@ import dotenv from "dotenv";
 import { ContabiliumClient } from "./src/contabilium-client.js";
 import { registerContabiliumTools } from "./src/register-tools.js";
 import { SYSTEM_INSTRUCTION } from "./src/instructions.js";
+import { getDiscoveryLogs } from "./src/tools/registrar_consulta_no_soportada.js";
 
 dotenv.config();
 
@@ -209,6 +210,15 @@ app.post("/api/generate-token", async (req, res) => {
   } catch (err) {
     return res.status(500).json({ ok: false, error: `Error conectando con Contabilium: ${err.message}` });
   }
+});
+
+// Endpoint para auditar y descargar consultas no soportadas (Discovery)
+app.get("/api/discovery-logs", (req, res) => {
+  const logs = getDiscoveryLogs();
+  return res.json({
+    total: logs.length,
+    logs,
+  });
 });
 
 // -------------------------------------------------------------
