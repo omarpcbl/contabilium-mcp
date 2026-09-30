@@ -437,7 +437,7 @@ app.get("/", (req, res) => {
     </div>
 
     <div class="security-note">
-      🛡️ <strong>Protocolo 2026:</strong> Utiliza el nuevo transporte <em>Streamable HTTP</em> (`/mcp`) recomendado por Anthropic, totalmente stateless y optimizado para Serverless (Vercel). Tus claves se cifran con AES-256-GCM.
+      🛡️ <strong>Protocolo 2026:</strong> Utiliza el nuevo transporte <em>Streamable HTTP</em> (<code>/mcp</code>) recomendado por Anthropic, totalmente stateless y optimizado para Serverless (Vercel). Tus claves se cifran con AES-256-GCM.
     </div>
   </div>
 
