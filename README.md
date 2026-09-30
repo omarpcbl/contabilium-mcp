@@ -38,6 +38,10 @@ Además, incorpora `registrar_consulta_no_soportada` como instrumento de Product
 | `resumen_ventas` | Ventas | Totaliza ventas por período, agrupables por día, semana, mes o cliente. Resta Notas de Crédito. |
 | `stock_por_deposito` | Stock | Consulta stock actual y reservado de un producto en un depósito específico o en todos. Calcula disponible real. |
 | `cuentas_por_cobrar` | Deuda | Lista comprobantes con saldo pendiente de cobro y totaliza deuda agrupada por cliente. |
+| `crear_borrador_factura` | Facturación | **Paso 1 seguro:** Guarda un borrador en Contabilium con precálculo fiscal AFIP y devuelve preview para confirmación humana. |
+| `autorizar_factura_electronica` | Facturación | **Paso 2 seguro:** Envía el borrador confirmado a AFIP/SII para obtener CAE/Folio y link PDF. |
+| `emitir_factura_express` | Facturación | Emisión directa en 1 solo paso (crea, cobra y emite CAE). Solo si el usuario lo solicita explícitamente. |
+| `obtener_factura_pdf` | Facturación | Obtiene el estado fiscal y la URL de visualización/descarga del PDF oficial. |
 | `registrar_consulta_no_soportada` | Discovery | Registra internamente consultas fuera de alcance para priorizar el backlog de producto. |
 | `contabilium_auth_status` | Diagnóstico | Valida conectividad y reporta Razón Social, CUIT y estado del token. |
 

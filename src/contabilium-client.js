@@ -304,4 +304,85 @@ export class ContabiliumClient {
       totalRegistros: allItems.length,
     };
   }
+
+  /**
+   * Petición HTTP POST con Bearer Token, Rate Limiting y Retry ante 429/401
+   */
+  async post(endpoint, body = {}, params = null) {
+    await this._waitForRateLimit();
+    const token = await this.ensureValidToken();
+
+    let cleanEndpoint = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+    if (!cleanEndpoint.startsWith("/api") && !cleanEndpoint.startsWith("/notificador")) {
+      cleanEndpoint = `/api${cleanEndpoint}`;
+    }
+
+    const url = new URL(`${this.baseUrl}${cleanEndpoint}`);
+    if (params && typeof params === "object") {
+      for (const [key, value] of Object.entries(params)) {
+        if (value !== undefined && value !== null && value !== "") {
+          url.searchParams.append(key, String(value));
+        }
+      }
+    }
+
+    const executeCall = async (retryOn429 = true, retryOn401 = true) => {
+      let res;
+      try {
+        res = await fetch(url.toString(), {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify(body),
+        });
+      } catch (netErr) {
+        const cause = netErr.cause;
+        const causeDetail = cause ? ` [Causa: ${cause.code || cause.message || cause}]` : "";
+        throw new Error(`Error de red al conectar con Contabilium (${url.toString()}): ${netErr.message}${causeDetail}`);
+      }
+
+      if (res.status === 401 && retryOn401) {
+        await this.ensureValidToken(true);
+        return executeCall(retryOn429, false);
+      }
+
+      if (res.status === 429 && retryOn429) {
+        console.error("[RateLimit] 429 detectado en POST. Esperando 3 segundos para reintentar...");
+        await new Promise((r) => setTimeout(r, 3000));
+        return executeCall(false, retryOn401);
+      }
+
+      if (res.status === 403) {
+        throw new Error("Acceso denegado (403): La cuenta no tiene permisos para esta acción o fue bloqueada por Cloudflare.");
+      }
+
+      const contentType = res.headers.get("content-type") || "";
+      let data;
+      if (contentType.includes("application/json")) {
+        try {
+          data = await res.json();
+        } catch {
+          data = await res.text();
+        }
+      } else {
+        const rawText = await res.text();
+        if (rawText.includes("<!DOCTYPE") || rawText.includes("<html")) {
+          throw new Error("Error inesperado en el servicio de Contabilium (respuesta HTML no válida).");
+        }
+        data = rawText;
+      }
+
+      if (!res.ok) {
+        let msg = typeof data === "object" ? (data.Description || data.Message || data.message || JSON.stringify(data)) : String(data);
+        throw new Error(`Error de Contabilium (HTTP ${res.status}): ${msg}`);
+      }
+
+      return data;
+    };
+
+    return executeCall();
+  }
 }

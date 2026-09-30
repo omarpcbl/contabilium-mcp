@@ -6,6 +6,10 @@ import * as listarVentas from "./tools/listar_ventas.js";
 import * as resumenVentas from "./tools/resumen_ventas.js";
 import * as stockPorDeposito from "./tools/stock_por_deposito.js";
 import * as cuentasPorCobrar from "./tools/cuentas_por_cobrar.js";
+import * as crearBorradorFactura from "./tools/crear_borrador_factura.js";
+import * as autorizarFacturaElectronica from "./tools/autorizar_factura_electronica.js";
+import * as emitirFacturaExpress from "./tools/emitir_factura_express.js";
+import * as obtenerFacturaPdf from "./tools/obtener_factura_pdf.js";
 import * as registrarConsultaNoSoportada from "./tools/registrar_consulta_no_soportada.js";
 import { z } from "zod";
 
@@ -152,7 +156,79 @@ export function registerContabiliumTools(server, client) {
     }
   );
 
-  // 9. registrar_consulta_no_soportada
+  // ---------------------------------------------------------------------------
+  // Módulo de Facturación y Emisión Electrónica
+  // ---------------------------------------------------------------------------
+
+  // 9. crear_borrador_factura (Paso 1 del Flujo Seguro)
+  server.tool(
+    "crear_borrador_factura",
+    "Paso 1 del flujo seguro: Prepara y guarda un borrador de factura en Contabilium (sin impacto fiscal ni llamada a AFIP aún) para presentar el preview interactivo al usuario.",
+    crearBorradorFactura.schema,
+    async (args) => {
+      try {
+        return await crearBorradorFactura.handler(args, client);
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ error: err.message, datos: null, resumen: "Error al crear el borrador de factura", advertencias: [err.message], truncado: false }, null, 2) }],
+          isError: true,
+        };
+      }
+    }
+  );
+
+  // 10. autorizar_factura_electronica (Paso 2 del Flujo Seguro)
+  server.tool(
+    "autorizar_factura_electronica",
+    "Paso 2 del flujo seguro: Recibe el ID de un borrador ya confirmado por el humano y lo envía a autorizar ante el fisco (AFIP/SII) para obtener el CAE/Folio y el link PDF.",
+    autorizarFacturaElectronica.schema,
+    async (args) => {
+      try {
+        return await autorizarFacturaElectronica.handler(args, client);
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ error: err.message, datos: null, resumen: "Error al autorizar electrónicamente la factura ante el fisco", advertencias: [err.message], truncado: false }, null, 2) }],
+          isError: true,
+        };
+      }
+    }
+  );
+
+  // 11. emitir_factura_express (Flujo Express / Directo)
+  server.tool(
+    "emitir_factura_express",
+    "Emisión express en 1 solo paso: Crea, cobra y autoriza fiscalmente la factura de forma inmediata. Usar ÚNICAMENTE si el usuario lo solicita explícitamente.",
+    emitirFacturaExpress.schema,
+    async (args) => {
+      try {
+        return await emitirFacturaExpress.handler(args, client);
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ error: err.message, datos: null, resumen: "Error en la emisión express", advertencias: [err.message], truncado: false }, null, 2) }],
+          isError: true,
+        };
+      }
+    }
+  );
+
+  // 12. obtener_factura_pdf
+  server.tool(
+    "obtener_factura_pdf",
+    "Obtiene el estado de emisión y la URL para visualizar y descargar el PDF oficial de una factura emitida.",
+    obtenerFacturaPdf.schema,
+    async (args) => {
+      try {
+        return await obtenerFacturaPdf.handler(args, client);
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ error: err.message, datos: null, resumen: "Error al obtener el PDF de la factura", advertencias: [err.message], truncado: false }, null, 2) }],
+          isError: true,
+        };
+      }
+    }
+  );
+
+  // 13. registrar_consulta_no_soportada
   server.tool(
     "registrar_consulta_no_soportada",
     "Registra internamente una consulta que el MCP no pudo responder por falta de datos o endpoint. Usar de forma transparente cuando el usuario pida algo fuera del alcance.",
@@ -184,7 +260,6 @@ export function registerContabiliumTools(server, client) {
 
         const report = {
           configuracion: {
-            ambiente: client.ambiente || (client.isParallel ? "QA / Paralelo" : "Producción"),
             usuarioIdentificador: masked,
             pais: client.country,
             urlBase: client.baseUrl,
@@ -208,27 +283,8 @@ export function registerContabiliumTools(server, client) {
 
         return { content: [{ type: "text", text: JSON.stringify(report, null, 2) }] };
       } catch (err) {
-        let sugerencia = "Revisa la conectividad de red hacia la URL Base configurada.";
-        const msg = err.message || "";
-        if (msg.includes("CERT") || msg.includes("certificate") || msg.includes("self-signed")) {
-          sugerencia = "Certificado SSL no reconocido por Node.js. Agrega CONTABILIUM_IGNORE_SSL: 'true' en las variables de entorno de tu conector.";
-        } else if (msg.includes("ENOTFOUND")) {
-          sugerencia = "El dominio no pudo resolverse por DNS. Verifica si la VPN de QA está activa y conectada.";
-        } else if (msg.includes("ECONNREFUSED") || msg.includes("ETIMEDOUT") || msg.includes("ConnectTimeoutError")) {
-          sugerencia = "Conexión rechazada o expirada. Verifica que la VPN esté conectada y que el host/puerto sean accesibles.";
-        }
-
         return {
-          content: [{
-            type: "text",
-            text: JSON.stringify({
-              conectado: false,
-              ambiente: client.isParallel ? "QA / Paralelo" : "Producción",
-              urlIntentada: client.baseUrl,
-              error: err.message,
-              diagnostico: sugerencia
-            }, null, 2)
-          }],
+          content: [{ type: "text", text: JSON.stringify({ conectado: false, error: err.message }, null, 2) }],
           isError: true,
         };
       }
