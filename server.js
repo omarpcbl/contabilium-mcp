@@ -539,6 +539,11 @@ app.post("/messages", async (req, res) => {
   await transport.handlePostMessage(req, res);
 });
 
-app.listen(PORT, () => {
-  console.log(`🚀 Contabilium Remote MCP Server (AES-256-GCM) corriendo en el puerto ${PORT}`);
-});
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`🚀 Contabilium Remote MCP Server (AES-256-GCM) corriendo en el puerto ${PORT}`);
+  });
+}
+
+export default app;
+
