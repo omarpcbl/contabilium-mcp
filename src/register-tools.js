@@ -184,6 +184,7 @@ export function registerContabiliumTools(server, client) {
 
         const report = {
           configuracion: {
+            ambiente: client.isParallel ? "QA / Paralelo" : "Producción",
             usuarioIdentificador: masked,
             pais: client.country,
             urlBase: client.baseUrl,

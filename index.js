@@ -32,6 +32,7 @@ const client = new ContabiliumClient({
   clientId: process.env.CONTABILIUM_CLIENT_ID,
   clientSecret: process.env.CONTABILIUM_CLIENT_SECRET,
   country: process.env.CONTABILIUM_COUNTRY || "AR",
+  baseUrl: process.env.CONTABILIUM_BASE_URL,
 });
 
 const server = new McpServer(

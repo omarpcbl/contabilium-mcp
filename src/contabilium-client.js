@@ -22,6 +22,7 @@ export class ContabiliumClient {
     this.clientSecret = (credentials.clientSecret || process.env.CONTABILIUM_CLIENT_SECRET || "").trim();
     this.country = (credentials.country || process.env.CONTABILIUM_COUNTRY || "AR").toUpperCase();
     this.baseUrl = (credentials.baseUrl || process.env.CONTABILIUM_BASE_URL || COUNTRY_URLS[this.country] || COUNTRY_URLS.AR).replace(/\/+$/, "");
+    this.isParallel = Boolean(credentials.isParallel);
 
     // Estado del token OAuth2
     this.cachedToken = null;

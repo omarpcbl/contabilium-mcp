@@ -69,9 +69,94 @@ Ideal para Antigravity, Claude Desktop o Cursor:
       "env": {
         "CONTABILIUM_CLIENT_ID": "tu_email@empresa.com",
         "CONTABILIUM_CLIENT_SECRET": "tu_api_key_privada",
-        "CONTABILIUM_COUNTRY": "AR"
+        "CONTABILIUM_COUNTRY": "AR",
+        "CONTABILIUM_BASE_URL": "https://rest.contabilium.com"
       }
     }
   }
 }
 ```
+
+---
+
+## ⚙️ Configuración Avanzada y Variables de Entorno en Vercel
+
+Configura estas variables en el panel de **Vercel** (`Proyecto > Settings > Environment Variables`) o en tu archivo local `.env`:
+
+### 1. URL Base Configurable (`CONTABILIUM_BASE_URL`)
+
+Permite apuntar todas las llamadas a la API de Contabilium hacia un endpoint personalizado (por ejemplo: proxies corporativos, API gateways, servidores mock o entornos de prueba).
+
+- **Variable:** `CONTABILIUM_BASE_URL`
+- **Ejemplo:** `https://rest.contabilium.com` o `https://tu-proxy-api.empresa.com`
+- **Comportamiento:**
+  - Si está configurada, sobreescribe automáticamente las URLs de país predeterminadas (`https://rest.contabilium.com`, `https://rest.contabilium.cl`, `https://rest.contabilium.com.uy`).
+  - Aplica tanto a la validación de credenciales al generar tokens como a todas las consultas de herramientas del cliente HTTP.
+  - Si se omite, el servidor selecciona la URL oficial de Contabilium correspondiente al país (`CONTABILIUM_COUNTRY` o selección del usuario en el formulario).
+
+---
+
+### 2. Manejo de MCP Paralelo / QA (Oculto a Usuarios Finales)
+
+El servidor incluye un **canal MCP secundario e independiente**, diseñado específicamente para pruebas de QA, staging o perfiles de permisos diferenciados.
+
+> 🔒 **Privacidad Total:** La interfaz pública principal (`/`) no menciona ni enlaza este canal en ningún momento. Los usuarios finales solo tienen acceso a su conector habitual de producción.
+
+#### Variables de Entorno para el Entorno Paralelo:
+
+| Variable | Requerida | Valor por Defecto | Descripción |
+|---|---|---|---|
+| `MCP_QA_PATH` | No | `/qa` | Ruta base para el MCP paralelo (ej: `/qa`, `/interno`, etc.). |
+| `CONTABILIUM_QA_BASE_URL` | No | `CONTABILIUM_BASE_URL` | **URL Base de la API para QA / Sandbox / Mock**. |
+| `CONTABILIUM_QA_CLIENT_ID` | Opcional | *(Vacío)* | Email de API para QA configurado en el servidor Vercel. |
+| `CONTABILIUM_QA_CLIENT_SECRET` | Opcional | *(Vacío)* | API Key privada de QA en Vercel. |
+| `CONTABILIUM_QA_COUNTRY` | No | `AR` | País de la cuenta fiscal de QA (`AR`, `CL`, `UY`). |
+| `MCP_QA_SECRET` | Recomendada | *(Vacío)* | Secreto para restringir el acceso a la ruta de QA contra accesos no autorizados. |
+| `MCP_QA_NAME` | No | `contabilium-mcp-qa` | Nombre del servidor reportado a Claude en el handshake de MCP. |
+
+#### Endpoints Disponibles del MCP Paralelo:
+- **Streamable HTTP (Estándar recomendado Claude 2026):** `https://tu-proyecto.vercel.app/qa/mcp`
+- **Legacy SSE:** `https://tu-proyecto.vercel.app/qa/sse`
+- **Portal Web Privado de QA:** `https://tu-proyecto.vercel.app/qa`
+
+#### Métodos de Conexión a Claude:
+
+##### Modo A: Conexión Directa con Credenciales en Vercel (Recomendado para QA)
+1. En Vercel, agrega las variables:
+   - `CONTABILIUM_QA_BASE_URL` (URL base de QA)
+   - `CONTABILIUM_QA_CLIENT_ID` (Email API de la cuenta de pruebas)
+   - `CONTABILIUM_QA_CLIENT_SECRET` (API Key de la cuenta de pruebas)
+   - *(Opcional)* `MCP_QA_SECRET=miClaveSegura123`
+2. En Claude (**Settings > Connectors > Add custom connector**):
+   - **Name:** `Contabilium QA`
+   - **MCP server URL:**
+     - Sin secret: `https://tu-proyecto.vercel.app/qa/mcp`
+     - Con secret: `https://tu-proyecto.vercel.app/qa/mcp?key=miClaveSegura123`
+   - **Authentication:** `No sign-in (Detected)`
+3. Claude se conectará inmediatamente utilizando las credenciales del servidor y la URL Base de QA, sin necesidad de tokens en el query string.
+
+##### Modo B: Token Cifrado mediante el Portal Privado
+1. Accede en el navegador a `https://tu-proyecto.vercel.app/qa` (si configuraste `MCP_QA_SECRET`, agrega `?key=tu_secreto` o ingrésalo en pantalla).
+2. Ingresa el Email y API Key de tu cuenta de pruebas y presiona **Generar URL QA**.
+3. Copia el conector generado (`https://tu-proyecto.vercel.app/qa/mcp?auth=<TOKEN_CIFRADO_QA>`) y pégalo en Claude.
+
+#### Verificación de Conectividad y Ambiente:
+Para confirmar que estás operando sobre el entorno correcto, pídele a Claude:
+> *"Verifica el estado de autenticación y conectividad de Contabilium"*
+
+La herramienta `contabilium_auth_status` responderá con:
+```json
+{
+  "configuracion": {
+    "ambiente": "QA / Paralelo",
+    "usuarioIdentificador": "qa***@empresa.com",
+    "pais": "AR",
+    "urlBase": "https://rest.contabilium.com"
+  },
+  "conexionEnVivo": {
+    "conectado": true,
+    "razonSocial": "Empresa Verificada (QA)"
+  }
+}
+```
+
