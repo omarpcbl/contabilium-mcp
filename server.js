@@ -2284,7 +2284,7 @@ function renderAccessGateHtml() {
         <span>Acceso Privado</span>
       </div>
       <h1>Acceso Restringido</h1>
-      <p class="gate-subtitle">Este portal se encuentra en fase de validación interna. Ingresa la clave de acceso autorizada para ingresar.</p>
+      <p class="gate-subtitle">Ingresa la clave de acceso para continuar.</p>
     </div>
 
     <form class="gate-form" id="gateForm" novalidate>
