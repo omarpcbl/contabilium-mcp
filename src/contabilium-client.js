@@ -27,10 +27,12 @@ export class ContabiliumClient {
     const isQa = Boolean(
       credentials.isParallel ||
       process.env.MCP_ENVIRONMENT === "qa" ||
-      /qa|staging|dev|sandbox|test/i.test(this.baseUrl)
+      /(qa|staging|dev|sandbox|test)/i.test(this.baseUrl)
     );
     this.isParallel = isQa;
-    this.ambiente = isQa ? "QA / Paralelo" : "Producción";
+    this.ambiente = isQa 
+      ? "QA / Pruebas (Ambiente de Testing - Sin validez fiscal ante AFIP)" 
+      : "Producción (Ambiente Real - Con validez fiscal ante AFIP)";
 
     // Estado del token OAuth2
     this.cachedToken = null;
@@ -105,7 +107,7 @@ export class ContabiliumClient {
     } catch (netErr) {
       const cause = netErr.cause;
       const causeDetail = cause ? ` [Causa: ${cause.code || cause.message || cause}]` : "";
-      throw new Error(`Error de red al conectar con el endpoint de autenticación (${tokenUrl}): ${netErr.message}${causeDetail}`);
+      throw new Error(`Error de red al conectar con el servicio de autenticación de Contabilium: ${netErr.message}${causeDetail}`);
     }
 
     if (!response.ok) {
@@ -191,7 +193,7 @@ export class ContabiliumClient {
       } catch (netErr) {
         const cause = netErr.cause;
         const causeDetail = cause ? ` [Causa: ${cause.code || cause.message || cause}]` : "";
-        throw new Error(`Error de red al conectar con Contabilium (${url.toString()}): ${netErr.message}${causeDetail}`);
+        throw new Error(`Error de red al consultar Contabilium: ${netErr.message}${causeDetail}`);
       }
 
       if (res.status === 401 && retryOn401) {
@@ -341,7 +343,7 @@ export class ContabiliumClient {
       } catch (netErr) {
         const cause = netErr.cause;
         const causeDetail = cause ? ` [Causa: ${cause.code || cause.message || cause}]` : "";
-        throw new Error(`Error de red al conectar con Contabilium (${url.toString()}): ${netErr.message}${causeDetail}`);
+        throw new Error(`Error de red al enviar operación a Contabilium: ${netErr.message}${causeDetail}`);
       }
 
       if (res.status === 401 && retryOn401) {

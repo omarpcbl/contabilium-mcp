@@ -251,6 +251,13 @@ export function registerContabiliumTools(server, client) {
     "Verifica el estado del token y conectividad con la cuenta de Contabilium.",
     { ping: z.boolean().default(true).describe("Si es true, valida conexión en vivo con Contabilium.") },
     async ({ ping }) => {
+      const esAmbientePruebas = Boolean(
+        client.isParallel ||
+        client.ambiente?.includes("QA") ||
+        /(qa|staging|dev|sandbox|test)/i.test(client.baseUrl || "") ||
+        process.env.MCP_ENVIRONMENT === "qa"
+      );
+
       try {
         let masked = "NO_CONFIGURADO";
         if (client.clientId) {
@@ -260,9 +267,12 @@ export function registerContabiliumTools(server, client) {
 
         const report = {
           configuracion: {
+            ambiente: esAmbientePruebas 
+              ? "QA / Pruebas (Ambiente de Testing - Sin validez fiscal ante AFIP)" 
+              : "Producción (Ambiente Real - Con validez fiscal ante AFIP)",
+            validezFiscalReal: !esAmbientePruebas,
             usuarioIdentificador: masked,
             pais: client.country,
-            urlBase: client.baseUrl,
           },
           token: {
             activo: Boolean(client.cachedToken && Date.now() < client.tokenExpiresAt),
@@ -283,8 +293,29 @@ export function registerContabiliumTools(server, client) {
 
         return { content: [{ type: "text", text: JSON.stringify(report, null, 2) }] };
       } catch (err) {
+        let sugerencia = "Revisa la conectividad de red con el servicio de Contabilium.";
+        const msg = err.message || "";
+        if (msg.includes("CERT") || msg.includes("certificate") || msg.includes("self-signed")) {
+          sugerencia = "Certificado SSL no reconocido por Node.js. Agrega CONTABILIUM_IGNORE_SSL: 'true' en tu configuración.";
+        } else if (msg.includes("ENOTFOUND")) {
+          sugerencia = "El dominio no pudo resolverse por DNS. Si es entorno de QA, verifica si la VPN está conectada.";
+        } else if (msg.includes("ECONNREFUSED") || msg.includes("ETIMEDOUT") || msg.includes("ConnectTimeoutError")) {
+          sugerencia = "Conexión rechazada o expirada. Verifica que la red o VPN permita el acceso.";
+        }
+
         return {
-          content: [{ type: "text", text: JSON.stringify({ conectado: false, error: err.message }, null, 2) }],
+          content: [{
+            type: "text",
+            text: JSON.stringify({
+              conectado: false,
+              ambiente: esAmbientePruebas
+                ? "QA / Pruebas (Ambiente de Testing - Sin validez fiscal ante AFIP)"
+                : "Producción (Ambiente Real - Con validez fiscal ante AFIP)",
+              validezFiscalReal: !esAmbientePruebas,
+              error: err.message,
+              diagnostico: sugerencia
+            }, null, 2)
+          }],
           isError: true,
         };
       }

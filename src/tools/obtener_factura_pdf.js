@@ -13,15 +13,12 @@ export async function handler({ id_comprobante }, client) {
   const cae = info?.Cae || info?.cae || info?.CAE || "";
   const estadoFiscal = cae ? "Emitido con CAE" : "Borrador sin CAE";
 
-  // URL del PDF en la API
-  const pdfApiUrl = `${client.baseUrl}/api/comprobantes/obtenerPdf?id=${id_comprobante}`;
-
   const datos = {
     id_comprobante,
     numero_comprobante: numero,
     estado_fiscal: estadoFiscal,
     cae: cae || null,
-    api_pdf_url: pdfApiUrl,
+    disponible_en_panel: Boolean(cae),
   };
 
   const resumen = `Comprobante #${id_comprobante} (${numero} - ${estadoFiscal}).`;

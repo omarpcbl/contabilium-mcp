@@ -227,7 +227,7 @@ app.post("/api/generate-token", async (req, res) => {
       const errText = await authRes.text();
       return res.status(401).json({
         ok: false,
-        error: `Credenciales inválidas en Contabilium (${authRes.status}): Revisa tu Email de API y tu API Key. (Base URL: ${baseUrl})`,
+        error: `Credenciales inválidas en Contabilium (${authRes.status}): Revisa tu Email de API y tu API Key.`,
       });
     }
 
@@ -275,10 +275,9 @@ app.post("/api/generate-token", async (req, res) => {
       cuit,
       pais: country.toUpperCase(),
       ambiente: isParallel ? "QA / Paralelo" : "Producción",
-      baseUrl,
     });
   } catch (err) {
-    return res.status(500).json({ ok: false, error: `Error conectando con Contabilium (${baseUrl}): ${err.message}` });
+    return res.status(500).json({ ok: false, error: `Error conectando con Contabilium: ${err.message}` });
   }
 });
 
