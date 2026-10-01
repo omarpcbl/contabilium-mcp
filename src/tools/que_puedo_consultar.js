@@ -33,16 +33,18 @@ export async function handler({ categoria = "todos" }, client) {
   }
 
   const moduloVentas = {
-    nombre: "Ventas y Facturación Comercial",
-    tools: ["resumen_ventas", "listar_ventas"],
+    nombre: "Ventas, Órdenes y Facturación Comercial",
+    tools: ["resumen_ventas", "listar_ventas", "buscar_ordenes_venta"],
     capacidades: [
       "Totalizar ventas netas deduciendo notas de crédito automáticamente.",
       "Desglosar facturación bruta, NC y ticket promedio.",
       "Agrupar por día, semana, mes, cliente u origen de venta.",
+      "Consultar órdenes de venta e-commerce y preventas por número de orden o integración.",
       "Comparar variaciones porcentuales contra el período anterior.",
     ],
     preguntas_ejemplo: [
       "¿Cómo vienen las ventas netas de este mes comparadas con el mes anterior?",
+      "Buscá la orden de venta 2000018479202700 de la integración 27341.",
       "Mostrame la curva de ventas diarias de los últimos 30 días.",
       "¿Cuáles son los 5 clientes con mayor volumen de compra en el año?",
     ],

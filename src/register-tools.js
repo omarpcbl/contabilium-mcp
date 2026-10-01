@@ -8,6 +8,7 @@ import * as stockPorDeposito from "./tools/stock_por_deposito.js";
 import * as cuentasPorCobrar from "./tools/cuentas_por_cobrar.js";
 import * as quePuedoConsultar from "./tools/que_puedo_consultar.js";
 import * as diagnosticarOrden from "./tools/diagnosticar_orden.js";
+import * as buscarOrdenesVenta from "./tools/buscar_ordenes_venta.js";
 import * as crearBorradorFactura from "./tools/crear_borrador_factura.js";
 import * as autorizarFacturaElectronica from "./tools/autorizar_factura_electronica.js";
 import * as emitirFacturaExpress from "./tools/emitir_factura_express.js";
@@ -186,6 +187,23 @@ export function registerContabiliumTools(server, client) {
       } catch (err) {
         return {
           content: [{ type: "text", text: JSON.stringify({ error: err.message, datos: null, resumen: "Error al diagnosticar orden", advertencias: [err.message], truncado: false }, null, 2) }],
+          isError: true,
+        };
+      }
+    }
+  );
+
+  // OP-09: buscar_ordenes_venta (Búsqueda de órdenes de venta e integraciones e-commerce)
+  server.tool(
+    "buscar_ordenes_venta",
+    "Busca y lista órdenes de venta e-commerce o preventas en Contabilium por rango de fechas (máx 92 días), filtro (número de orden, referencia externa o cliente) e ID de integración opcional. Devuelve estado, totales, facturación asociada e ítems.",
+    buscarOrdenesVenta.schema,
+    async (args) => {
+      try {
+        return await buscarOrdenesVenta.handler(args, client);
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ error: err.message, datos: null, resumen: "Error al buscar órdenes de venta", advertencias: [err.message], truncado: false }, null, 2) }],
           isError: true,
         };
       }
