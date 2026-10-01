@@ -303,44 +303,39 @@ app.get("/", (req, res) => {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
   <style>
     :root {
-      /* Éxito */
-      --cbl-success-text: #0B5F4E;
-      --cbl-success-bg: #E6F7F4;
-      --cbl-success-accent: #12A594;
+      /* Colores Esencia Contabilium */
+      --cbl-brand: #00C7AF;             /* Turquesa / Teal Primario Contabilium */
+      --cbl-brand-hover: #00E2C8;       /* Hover más luminoso */
+      --cbl-brand-active: #00A994;      /* Active / Pressed */
+      --cbl-brand-tint: rgba(0, 199, 175, 0.12); /* Glow / Badge de fondo */
+      --cbl-brand-glow: rgba(0, 199, 175, 0.25); /* Focus Ring / Glow */
 
-      /* Error */
-      --cbl-danger-text: #E91E63;
-      --cbl-danger-bg: #FDE8EE;
+      /* Estados del Sistema (según Design Kit de Contabilium) */
+      --cbl-success-text: #00E5C8;
+      --cbl-success-bg: rgba(0, 199, 175, 0.12);
+      --cbl-success-accent: #00C7AF;
 
-      /* Advertencia */
-      --cbl-warning-text: #9A4B06;
-      --cbl-warning-bg: #FEF3E9;
+      --cbl-danger-text: #FF648A;
+      --cbl-danger-bg: rgba(243, 36, 101, 0.14);
+      --cbl-danger-accent: #F32465;
+
+      --cbl-warning-text: #FFB347;
+      --cbl-warning-bg: rgba(255, 140, 0, 0.14);
       --cbl-warning-accent: #FF8C00;
 
-      /* Resaltado / CTA */
-      --cbl-highlight: #4C46C6;
-      --cbl-highlight-hover: #5B5BF0;
-      --cbl-highlight-bg: #EFEEFC;
-
-      /* Neutros */
-      --cbl-text-primary: #111111;
-      --cbl-text-secondary: #666666;
-      --cbl-border: #d9d9d9;
-      --cbl-bg: #eeeeee;
-
-      /* Material Design 3 - Dark Theme Surfaces sobre fondo negro */
-      --m3-surface: #101014;
-      --m3-surface-container: #16161c;
-      --m3-surface-container-high: #1e1e26;
-      --m3-surface-container-highest: #262632;
-      --m3-outline: #383846;
-      --m3-outline-variant: #262632;
-      --m3-on-surface: #f4f4f7;
-      --m3-on-surface-variant: #a0a0b2;
+      /* Material 3 / Modern Dark Theme Surfaces */
+      --m3-surface: #0E1015;
+      --m3-surface-container: #141720;
+      --m3-surface-container-high: #1A1E29;
+      --m3-surface-container-highest: #222736;
+      --m3-outline: #2C3344;
+      --m3-outline-variant: #1E2330;
+      --m3-on-surface: #F3F4F6;
+      --m3-on-surface-variant: #9CA3AF;
       --m3-motion-standard: cubic-bezier(0.2, 0, 0, 1);
     }
 
@@ -351,8 +346,8 @@ app.get("/", (req, res) => {
     }
 
     body {
-      font-family: 'Roboto', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background-color: #000000;
+      font-family: 'Work Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background-color: #07080B;
       color: var(--m3-on-surface);
       min-height: 100vh;
       display: flex;
@@ -365,23 +360,23 @@ app.get("/", (req, res) => {
       overflow-x: hidden;
     }
 
-    /* Fondo ambiental sutil (sin layout shift) */
+    /* Fondo ambiental sutil con el glow turquesa de Contabilium */
     body::before {
       content: "";
       position: absolute;
       top: -160px;
       left: 50%;
       transform: translateX(-50%);
-      width: 640px;
+      width: 680px;
       height: 480px;
-      background: radial-gradient(circle, rgba(76, 70, 198, 0.16) 0%, rgba(0, 0, 0, 0) 70%);
+      background: radial-gradient(circle, rgba(0, 199, 175, 0.12) 0%, rgba(7, 8, 11, 0) 70%);
       pointer-events: none;
       z-index: 0;
     }
 
     /* Regla UI/UX Pro Max: Focus Visible universal de alto contraste */
     :focus-visible {
-      outline: 2px solid var(--cbl-highlight-hover);
+      outline: 2px solid var(--cbl-brand);
       outline-offset: 2px;
     }
 
@@ -390,11 +385,11 @@ app.get("/", (req, res) => {
       z-index: 1;
       background-color: var(--m3-surface);
       border: 1px solid var(--m3-outline-variant);
-      border-radius: 28px;
-      padding: 40px;
+      border-radius: 24px;
+      padding: 36px;
       max-width: 580px;
       width: 100%;
-      box-shadow: 0 16px 40px -12px rgba(0, 0, 0, 0.8), 0 0 1px 1px rgba(255, 255, 255, 0.05);
+      box-shadow: 0 20px 50px -10px rgba(0, 0, 0, 0.9), 0 0 1px 1px rgba(255, 255, 255, 0.05);
       transition: border-color 0.25s var(--m3-motion-standard);
     }
 
@@ -408,14 +403,15 @@ app.get("/", (req, res) => {
     .header-icon-box {
       width: 48px;
       height: 48px;
-      border-radius: 16px;
-      background: var(--cbl-highlight-bg);
-      color: var(--cbl-highlight);
+      border-radius: 14px;
+      background: var(--cbl-brand-tint);
+      color: var(--cbl-brand);
+      border: 1px solid rgba(0, 199, 175, 0.25);
       display: flex;
       align-items: center;
       justify-content: center;
       flex-shrink: 0;
-      box-shadow: 0 4px 12px rgba(76, 70, 198, 0.2);
+      box-shadow: 0 4px 16px rgba(0, 199, 175, 0.15);
     }
 
     .header-icon-box .material-symbols-outlined {
@@ -446,21 +442,21 @@ app.get("/", (req, res) => {
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      background: var(--cbl-highlight-bg);
-      color: var(--cbl-highlight);
+      background: var(--cbl-brand-tint);
+      color: var(--cbl-brand);
       font-size: 11px;
       font-weight: 600;
-      padding: 4px 12px;
+      padding: 3px 10px;
       border-radius: 9999px;
       letter-spacing: 0.3px;
-      border: 1px solid rgba(76, 70, 198, 0.25);
+      border: 1px solid rgba(0, 199, 175, 0.25);
     }
 
     .badge .badge-dot {
       width: 6px;
       height: 6px;
       border-radius: 50%;
-      background: var(--cbl-highlight);
+      background: var(--cbl-brand);
       animation: pulseDot 2s infinite;
     }
 
@@ -470,7 +466,7 @@ app.get("/", (req, res) => {
     }
 
     .subtitle {
-      font-size: 14px;
+      font-size: 13.5px;
       color: var(--m3-on-surface-variant);
       line-height: 1.5;
     }
@@ -483,19 +479,44 @@ app.get("/", (req, res) => {
       gap: 6px;
     }
 
+    .field-label-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
     .field-label {
       font-size: 13px;
       font-weight: 500;
       color: var(--m3-on-surface);
-      display: flex;
-      align-items: center;
-      gap: 6px;
       cursor: pointer;
     }
 
-    .field-label .material-symbols-outlined {
-      font-size: 18px;
-      color: var(--m3-on-surface-variant);
+    .field-badge-mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 10.5px;
+      color: #9CA3AF;
+      background: rgba(255, 255, 255, 0.05);
+      padding: 2px 7px;
+      border-radius: 5px;
+      border: 1px solid var(--m3-outline);
+    }
+
+    .field-direct-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11.5px;
+      font-weight: 500;
+      color: var(--cbl-brand);
+      text-decoration: none;
+      transition: color 0.15s, opacity 0.15s;
+    }
+
+    .field-direct-link:hover {
+      color: var(--cbl-brand-hover);
+      text-decoration: underline;
     }
 
     .input-container {
@@ -504,24 +525,24 @@ app.get("/", (req, res) => {
       align-items: center;
       background: var(--m3-surface-container);
       border: 1px solid var(--m3-outline);
-      border-radius: 14px;
+      border-radius: 12px;
       min-height: 48px;
       transition: all 0.2s var(--m3-motion-standard);
     }
 
     .input-container:hover {
-      border-color: #555568;
+      border-color: #3E475C;
     }
 
     .input-container:focus-within {
-      border-color: var(--cbl-highlight);
-      box-shadow: 0 0 0 3px rgba(76, 70, 198, 0.25);
+      border-color: var(--cbl-brand);
+      box-shadow: 0 0 0 3px var(--cbl-brand-glow);
       background: var(--m3-surface-container-high);
     }
 
     .input-container.input-error {
-      border-color: var(--cbl-danger-text) !important;
-      box-shadow: 0 0 0 3px rgba(233, 30, 99, 0.2) !important;
+      border-color: var(--cbl-danger-accent) !important;
+      box-shadow: 0 0 0 3px rgba(243, 36, 101, 0.25) !important;
     }
 
     .input-container input,
@@ -530,15 +551,15 @@ app.get("/", (req, res) => {
       background: transparent;
       border: none;
       padding: 13px 16px;
-      font-size: 16px;
+      font-size: 15px;
       font-family: inherit;
       color: var(--m3-on-surface);
       outline: none;
     }
 
     .input-container input::placeholder {
-      color: #6a6a7c;
-      font-size: 14px;
+      color: #5E6678;
+      font-size: 13.5px;
     }
 
     .input-container select {
@@ -571,14 +592,22 @@ app.get("/", (req, res) => {
       display: flex;
       align-items: center;
       justify-content: center;
-      border-radius: 10px;
+      border-radius: 8px;
       margin-right: 4px;
       transition: color 0.15s, background-color 0.15s;
     }
 
     .toggle-visibility-btn:hover {
       color: var(--m3-on-surface);
-      background: rgba(255, 255, 255, 0.05);
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .supporting-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding-left: 2px;
     }
 
     .supporting-text {
@@ -596,45 +625,46 @@ app.get("/", (req, res) => {
       font-weight: 500;
     }
 
-    /* M3 Button */
+    /* M3 Button - Contabilium Brand Action */
     .btn-submit {
       width: 100%;
-      margin-top: 12px;
+      margin-top: 14px;
       min-height: 48px;
-      padding: 14px 24px;
-      background: var(--cbl-highlight);
-      color: #ffffff;
+      padding: 13px 24px;
+      background: var(--cbl-brand);
+      color: #07090D;
       border: none;
-      border-radius: 9999px;
+      border-radius: 12px;
       font-family: inherit;
-      font-weight: 600;
+      font-weight: 700;
       font-size: 15px;
-      letter-spacing: 0.2px;
+      letter-spacing: 0.1px;
       display: inline-flex;
       align-items: center;
       justify-content: center;
       gap: 10px;
       cursor: pointer;
-      box-shadow: 0 4px 14px rgba(76, 70, 198, 0.35);
+      box-shadow: 0 4px 18px rgba(0, 199, 175, 0.35);
       transition: background-color 0.2s, box-shadow 0.2s, transform 0.15s var(--m3-motion-standard);
       position: relative;
       overflow: hidden;
     }
 
     .btn-submit:hover:not(:disabled) {
-      background: var(--cbl-highlight-hover);
-      box-shadow: 0 6px 18px rgba(91, 91, 240, 0.45);
+      background: var(--cbl-brand-hover);
+      box-shadow: 0 6px 24px rgba(0, 199, 175, 0.45);
       transform: translateY(-1px);
     }
 
     .btn-submit:active:not(:disabled) {
+      background: var(--cbl-brand-active);
       transform: translateY(0);
-      box-shadow: 0 2px 8px rgba(76, 70, 198, 0.3);
+      box-shadow: 0 2px 8px rgba(0, 199, 175, 0.3);
     }
 
     .btn-submit:disabled {
-      background: #2b2b36;
-      color: #6d6d7e;
+      background: #1F2430;
+      color: #555E70;
       box-shadow: none;
       cursor: not-allowed;
       transform: none;
@@ -655,7 +685,7 @@ app.get("/", (req, res) => {
     .linear-progress::before {
       content: "";
       position: absolute;
-      background: var(--cbl-highlight);
+      background: var(--cbl-brand);
       top: 0;
       left: 0;
       bottom: 0;
@@ -680,8 +710,8 @@ app.get("/", (req, res) => {
       display: none;
       margin-top: 20px;
       background: var(--cbl-danger-bg);
-      border: 1px solid var(--cbl-danger-text);
-      border-radius: 16px;
+      border: 1px solid var(--cbl-danger-accent);
+      border-radius: 14px;
       padding: 16px;
       color: var(--cbl-danger-text);
       font-size: 13px;
@@ -694,7 +724,7 @@ app.get("/", (req, res) => {
     .alert-error .material-symbols-outlined {
       font-size: 20px;
       flex-shrink: 0;
-      color: var(--cbl-danger-text);
+      color: var(--cbl-danger-accent);
     }
 
     /* Tarjeta de Resultado M3 */
@@ -702,10 +732,11 @@ app.get("/", (req, res) => {
       display: none;
       margin-top: 24px;
       background: var(--m3-surface-container-high);
-      border: 1px solid var(--m3-outline);
-      border-radius: 20px;
+      border: 1px solid var(--cbl-brand);
+      border-radius: 18px;
       padding: 24px;
       animation: fadeIn 0.3s ease-out;
+      box-shadow: 0 10px 30px rgba(0, 199, 175, 0.1);
     }
 
     @keyframes fadeIn {
@@ -726,18 +757,18 @@ app.get("/", (req, res) => {
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      background: var(--cbl-success-bg);
-      color: var(--cbl-success-text);
+      background: var(--cbl-brand-tint);
+      color: var(--cbl-brand);
       padding: 6px 14px;
       border-radius: 9999px;
       font-size: 12px;
       font-weight: 600;
-      border: 1px solid var(--cbl-success-accent);
+      border: 1px solid var(--cbl-brand);
     }
 
     .status-badge-success .material-symbols-outlined {
       font-size: 18px;
-      color: var(--cbl-success-accent);
+      color: var(--cbl-brand);
     }
 
     .company-details {
@@ -771,7 +802,7 @@ app.get("/", (req, res) => {
       font-family: inherit;
       font-size: 13px;
       font-weight: 500;
-      min-height: 44px;
+      min-height: 42px;
       padding: 8px 16px;
       border-radius: 10px;
       cursor: pointer;
@@ -782,10 +813,10 @@ app.get("/", (req, res) => {
     }
 
     .tab-btn.active {
-      background: var(--cbl-highlight-bg);
-      color: var(--cbl-highlight);
+      background: var(--cbl-brand-tint);
+      color: var(--cbl-brand);
       font-weight: 600;
-      border-color: rgba(76, 70, 198, 0.3);
+      border-color: rgba(0, 199, 175, 0.35);
     }
 
     .tab-btn:hover:not(.active) {
@@ -795,13 +826,13 @@ app.get("/", (req, res) => {
 
     .url-display-box {
       position: relative;
-      background: var(--m3-surface);
+      background: #050608;
       border: 1px solid var(--m3-outline);
       border-radius: 12px;
       padding: 14px 54px 14px 14px;
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
       font-size: 12px;
-      color: #93c5fd;
+      color: var(--cbl-brand);
       word-break: break-all;
       line-height: 1.5;
       max-height: 100px;
@@ -810,24 +841,24 @@ app.get("/", (req, res) => {
 
     .copy-icon-btn {
       position: absolute;
-      top: 10px;
-      right: 10px;
-      background: var(--cbl-highlight);
-      color: #ffffff;
+      top: 8px;
+      right: 8px;
+      background: var(--cbl-brand);
+      color: #07090D;
       border: none;
-      border-radius: 10px;
-      min-width: 44px;
-      min-height: 44px;
+      border-radius: 9px;
+      min-width: 42px;
+      min-height: 42px;
       display: flex;
       align-items: center;
       justify-content: center;
       cursor: pointer;
       transition: background-color 0.15s, transform 0.15s;
-      box-shadow: 0 2px 6px rgba(76, 70, 198, 0.3);
+      box-shadow: 0 2px 8px rgba(0, 199, 175, 0.35);
     }
 
     .copy-icon-btn:hover {
-      background: var(--cbl-highlight-hover);
+      background: var(--cbl-brand-hover);
       transform: scale(1.04);
     }
 
@@ -850,27 +881,26 @@ app.get("/", (req, res) => {
 
     /* Card de Seguridad M3 */
     .security-card {
-      margin-top: 24px;
-      padding: 16px;
-      border-radius: 16px;
+      margin-top: 20px;
+      padding: 14px 16px;
+      border-radius: 14px;
       background: var(--m3-surface-container);
       border: 1px solid var(--m3-outline-variant);
       display: flex;
-      align-items: flex-start;
+      align-items: center;
       gap: 12px;
     }
 
     .security-card .material-symbols-outlined {
-      font-size: 22px;
-      color: var(--cbl-success-accent);
+      font-size: 20px;
+      color: var(--cbl-brand);
       flex-shrink: 0;
-      margin-top: 2px;
     }
 
     .security-card-content {
       font-size: 12px;
       color: var(--m3-on-surface-variant);
-      line-height: 1.5;
+      line-height: 1.45;
     }
 
     .security-card-content strong {
@@ -881,7 +911,7 @@ app.get("/", (req, res) => {
     .snackbar {
       visibility: hidden;
       min-width: 280px;
-      background: #1c1c24;
+      background: #171A22;
       color: #ffffff;
       text-align: center;
       border-radius: 12px;
@@ -893,7 +923,7 @@ app.get("/", (req, res) => {
       transform: translateX(-50%);
       font-size: 13px;
       font-weight: 500;
-      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.1);
+      box-shadow: 0 12px 30px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.1);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -936,14 +966,14 @@ app.get("/", (req, res) => {
 
     .btn-help-trigger:hover {
       background: var(--m3-surface-container-high);
-      border-color: var(--cbl-highlight);
-      color: #ffffff;
+      border-color: var(--cbl-brand);
+      color: var(--cbl-brand);
       transform: translateY(-1px);
     }
 
     .btn-help-trigger .material-symbols-outlined {
       font-size: 18px;
-      color: var(--cbl-highlight-hover);
+      color: var(--cbl-brand);
     }
 
     /* Footer link de ayuda secundaria */
@@ -959,7 +989,7 @@ app.get("/", (req, res) => {
       border: none;
       color: var(--m3-on-surface-variant);
       font-family: inherit;
-      font-size: 13px;
+      font-size: 12.5px;
       font-weight: 500;
       cursor: pointer;
       display: inline-flex;
@@ -972,8 +1002,8 @@ app.get("/", (req, res) => {
     }
 
     .help-link-action:hover {
-      color: var(--cbl-highlight-hover);
-      background: rgba(76, 70, 198, 0.08);
+      color: var(--cbl-brand);
+      background: var(--cbl-brand-tint);
     }
 
     .help-link-action .material-symbols-outlined {
@@ -1039,9 +1069,10 @@ app.get("/", (req, res) => {
     .help-icon-badge {
       width: 44px;
       height: 44px;
-      border-radius: 14px;
-      background: var(--cbl-highlight-bg);
-      color: var(--cbl-highlight);
+      border-radius: 12px;
+      background: var(--cbl-brand-tint);
+      color: var(--cbl-brand);
+      border: 1px solid rgba(0, 199, 175, 0.25);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -1108,15 +1139,15 @@ app.get("/", (req, res) => {
       width: 32px;
       height: 32px;
       border-radius: 50%;
-      background: var(--cbl-highlight);
-      color: #ffffff;
+      background: var(--cbl-brand);
+      color: #07090D;
       font-weight: 700;
       font-size: 14px;
       display: flex;
       align-items: center;
       justify-content: center;
       flex-shrink: 0;
-      box-shadow: 0 2px 8px rgba(76, 70, 198, 0.35);
+      box-shadow: 0 2px 8px rgba(0, 199, 175, 0.35);
       margin-top: 2px;
     }
 
@@ -1138,6 +1169,18 @@ app.get("/", (req, res) => {
       margin-bottom: 8px;
     }
 
+    .link-inline {
+      color: var(--cbl-brand);
+      text-decoration: underline;
+      text-underline-offset: 3px;
+      font-weight: 500;
+      transition: color 0.15s;
+    }
+
+    .link-inline:hover {
+      color: var(--cbl-brand-hover);
+    }
+
     .step-note {
       background: var(--m3-surface-container);
       border: 1px solid var(--m3-outline-variant);
@@ -1153,7 +1196,7 @@ app.get("/", (req, res) => {
 
     .step-note .material-symbols-outlined {
       font-size: 18px;
-      color: var(--cbl-warning-accent);
+      color: var(--cbl-brand);
       flex-shrink: 0;
       margin-top: 1px;
     }
@@ -1189,8 +1232,8 @@ app.get("/", (req, res) => {
     }
 
     .client-tab.active {
-      background: var(--cbl-highlight-bg);
-      color: var(--cbl-highlight);
+      background: var(--cbl-brand-tint);
+      color: var(--cbl-brand);
       font-weight: 600;
     }
 
@@ -1229,7 +1272,7 @@ app.get("/", (req, res) => {
       padding: 2px 6px;
       border-radius: 6px;
       font-size: 11px;
-      color: #93c5fd;
+      color: var(--cbl-brand);
       border: 1px solid var(--m3-outline);
       font-family: monospace;
     }
@@ -1243,7 +1286,7 @@ app.get("/", (req, res) => {
       overflow-x: auto;
       font-size: 11px;
       line-height: 1.4;
-      color: #93c5fd;
+      color: var(--cbl-brand);
     }
 
     /* Capabilities Box */
@@ -1266,7 +1309,7 @@ app.get("/", (req, res) => {
 
     .help-capabilities-box h4 .material-symbols-outlined {
       font-size: 18px;
-      color: var(--cbl-success-accent);
+      color: var(--cbl-brand);
     }
 
     .capabilities-grid {
@@ -1289,7 +1332,7 @@ app.get("/", (req, res) => {
 
     .cap-pill .material-symbols-outlined {
       font-size: 15px;
-      color: var(--cbl-highlight-hover);
+      color: var(--cbl-brand);
     }
 
     /* Footer Modal */
@@ -1302,13 +1345,13 @@ app.get("/", (req, res) => {
     }
 
     .btn-help-primary {
-      background: var(--cbl-highlight);
-      color: #ffffff;
+      background: var(--cbl-brand);
+      color: #07090D;
       border: none;
-      border-radius: 9999px;
+      border-radius: 10px;
       padding: 12px 24px;
       font-family: inherit;
-      font-weight: 600;
+      font-weight: 700;
       font-size: 14px;
       display: inline-flex;
       align-items: center;
@@ -1319,7 +1362,7 @@ app.get("/", (req, res) => {
     }
 
     .btn-help-primary:hover {
-      background: var(--cbl-highlight-hover);
+      background: var(--cbl-brand-hover);
       transform: translateY(-1px);
     }
 
@@ -1372,17 +1415,17 @@ app.get("/", (req, res) => {
     <!-- Header -->
     <header class="card-header">
       <div class="header-icon-box" aria-hidden="true">
-        <span class="material-symbols-outlined">lock_open</span>
+        <span class="material-symbols-outlined">shield_lock</span>
       </div>
       <div class="header-title-wrap">
         <div class="title-row">
           <h1>Conector Contabilium MCP</h1>
-          <div class="badge" aria-label="Protocolo Model Context Protocol">
+          <div class="badge" aria-label="Protocolo MCP">
             <span class="badge-dot" aria-hidden="true"></span>
-            <span>Protocolo MCP</span>
+            <span>MCP</span>
           </div>
         </div>
-        <p class="subtitle">Conecta tu cuenta de Contabilium con asistentes y herramientas de IA mediante el protocolo estándar MCP.</p>
+        <p class="subtitle">Accede a tu facturación y stock desde tu asistente de IA.</p>
       </div>
 
       <!-- Trigger para abrir la Guía de Conexión -->
@@ -1394,46 +1437,45 @@ app.get("/", (req, res) => {
 
     <!-- Formulario M3 Accesible -->
     <form id="setupForm" novalidate aria-label="Formulario de conexión a Contabilium">
+      
+      <!-- 1. País / Región -->
       <div class="form-group">
-        <label class="field-label" for="clientId">
-          <span class="material-symbols-outlined" aria-hidden="true">mail</span>
-          Email de API (client_id)
-        </label>
-        <div class="input-container" id="clientIdContainer">
-          <input type="email" id="clientId" placeholder="ejemplo@tuempresa.com" required autocomplete="email" aria-describedby="clientIdHelp clientIdError" aria-invalid="false">
+        <label class="field-label" for="country">País</label>
+        <div class="input-container">
+          <select id="country" aria-label="Selecciona tu país">
+            <option value="AR">🇦🇷 Argentina (api.contabilium.com)</option>
+            <option value="CL">🇨🇱 Chile</option>
+            <option value="UY">🇺🇾 Uruguay</option>
+          </select>
+          <span class="material-symbols-outlined select-arrow" aria-hidden="true">expand_more</span>
         </div>
-        <span class="supporting-text" id="clientIdHelp">El correo registrado en tu cuenta de Contabilium para la API.</span>
+      </div>
+
+      <!-- 2. Email de API -->
+      <div class="form-group">
+        <label class="field-label" for="clientId">Email de API</label>
+        <div class="input-container" id="clientIdContainer">
+          <input type="email" id="clientId" placeholder="usuario@empresa.com" required autocomplete="email" aria-describedby="clientIdError" aria-invalid="false">
+        </div>
         <span class="inline-error-msg" id="clientIdError" role="alert">Ingresa un formato de correo electrónico válido.</span>
       </div>
 
+      <!-- 3. API Key -->
       <div class="form-group">
-        <label class="field-label" for="clientSecret">
-          <span class="material-symbols-outlined" aria-hidden="true">key</span>
-          API Key Privada (client_secret)
-        </label>
+        <div class="field-label-row">
+          <label class="field-label" for="clientSecret">API Key</label>
+          <a href="https://app.contabilium.com/modulos/miCuenta/api.aspx" target="_blank" rel="noopener noreferrer" class="field-direct-link" title="Obtener credenciales en Contabilium">
+            <span>Mi cuenta - API - Credenciales</span>
+            <span class="material-symbols-outlined" style="font-size:14px;">open_in_new</span>
+          </a>
+        </div>
         <div class="input-container" id="clientSecretContainer">
-          <input type="password" id="clientSecret" placeholder="Tu API Key de Contabilium" required autocomplete="current-password" aria-describedby="clientSecretHelp clientSecretError" aria-invalid="false">
+          <input type="password" id="clientSecret" placeholder="Pega tu API Key de Contabilium" required autocomplete="current-password" aria-describedby="clientSecretError" aria-invalid="false">
           <button type="button" class="toggle-visibility-btn" id="togglePasswordBtn" aria-label="Mostrar contraseña" aria-pressed="false">
             <span class="material-symbols-outlined" id="togglePasswordIcon" aria-hidden="true">visibility</span>
           </button>
         </div>
-        <span class="supporting-text" id="clientSecretHelp">Generada en la sección Integraciones > API de tu panel.</span>
         <span class="inline-error-msg" id="clientSecretError" role="alert">La API Key es obligatoria.</span>
-      </div>
-
-      <div class="form-group">
-        <label class="field-label" for="country">
-          <span class="material-symbols-outlined" aria-hidden="true">public</span>
-          País
-        </label>
-        <div class="input-container">
-          <select id="country" aria-label="Selecciona tu país">
-            <option value="AR">Argentina</option>
-            <option value="CL">Chile</option>
-            <option value="UY">Uruguay</option>
-          </select>
-          <span class="material-symbols-outlined select-arrow" aria-hidden="true">expand_more</span>
-        </div>
       </div>
 
       <button type="submit" class="btn-submit" id="submitBtn" aria-busy="false">
@@ -1481,25 +1523,21 @@ app.get("/", (req, res) => {
       </div>
 
       <div class="action-instruction">
-        <span class="material-symbols-outlined" aria-hidden="true" style="color: var(--cbl-highlight-hover); font-size:18px;">arrow_forward</span>
+        <span class="material-symbols-outlined" aria-hidden="true" style="color: var(--cbl-brand); font-size:18px;">arrow_forward</span>
         <span>Pega esta URL en el campo de configuración de servidores MCP de tu asistente o cliente de IA preferido.</span>
       </div>
     </section>
 
     <!-- Nota de Seguridad M3 -->
     <aside class="security-card" aria-label="Información de seguridad y cifrado">
-      <span class="material-symbols-outlined" aria-hidden="true">verified_user</span>
+      <span class="material-symbols-outlined" aria-hidden="true">lock</span>
       <div class="security-card-content">
-        <strong>Seguridad y Privacidad:</strong> Tus credenciales se cifran con <strong>AES-256-GCM</strong> y nunca se exponen en texto plano ante el modelo de IA ni terceros.
+        <strong>Cifrado AES-256:</strong> Tus credenciales viajan cifradas y nunca se exponen al modelo ni a terceros.
       </div>
     </aside>
 
-    <!-- Enlace secundario de ayuda al pie -->
-    <div class="card-help-footer">
-      <button type="button" class="help-link-action" id="openHelpBtnFooter" aria-haspopup="dialog" aria-controls="helpModal">
-        <span class="material-symbols-outlined">menu_book</span>
-        <span>¿Primera vez conectando este MCP? Ver guía paso a paso</span>
-      </button>
+    <div style="display:none;" aria-hidden="true">
+      <button type="button" id="openHelpBtnFooter"></button>
     </div>
   </main>
 
@@ -1513,7 +1551,7 @@ app.get("/", (req, res) => {
           </div>
           <div>
             <h2 id="helpModalTitle">¿Cómo conectar este servidor MCP?</h2>
-            <p class="help-modal-subtitle">Aprende a conectar Contabilium con cualquier cliente o asistente de IA compatible en 3 simples pasos.</p>
+            <p class="help-modal-subtitle">Conecta Contabilium con cualquier cliente o asistente de IA compatible en 3 simples pasos.</p>
           </div>
         </div>
         <button type="button" class="btn-close-modal" id="closeHelpBtn" aria-label="Cerrar guía de conexión">
@@ -1526,13 +1564,13 @@ app.get("/", (req, res) => {
         <div class="help-step-item">
           <div class="step-indicator" aria-hidden="true">1</div>
           <div class="step-content">
-            <h3>Obtén tus claves de API en Contabilium</h3>
-            <p>Ingresa a tu cuenta de Contabilium con tu usuario habitual y dirígete a:
-              <br><strong>Mi Cuenta &gt; Integraciones &gt; API</strong>.
+            <h3>Obtén tus claves en Contabilium</h3>
+            <p>Ingresa a tu cuenta de Contabilium y dirígete a:
+              <br><a href="https://app.contabilium.com/modulos/miCuenta/api.aspx" target="_blank" rel="noopener noreferrer" class="link-inline"><strong>Mi cuenta - API - Credenciales ↗</strong></a>.
             </p>
             <div class="step-note">
               <span class="material-symbols-outlined" aria-hidden="true">info</span>
-              <span>Copia tu <strong>Email de API</strong> (client_id) y tu <strong>API Key Privada</strong> (client_secret).</span>
+              <span>Copia tu <strong>Email de API</strong> y tu <strong>API Key Privada</strong>.</span>
             </div>
           </div>
         </div>
@@ -2047,24 +2085,31 @@ app.get(QA_PATH, (req, res) => {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
   <style>
     :root {
-      --qa-accent: #FF8C00;
-      --qa-bg-tint: #FEF3E9;
-      --m3-surface: #141210;
-      --m3-surface-container: #1c1815;
-      --m3-surface-container-high: #26211c;
-      --m3-outline: #42382e;
-      --m3-outline-variant: #2e261f;
-      --m3-on-surface: #f7f4f0;
-      --m3-on-surface-variant: #b2a498;
+      --cbl-brand: #00C7AF;
+      --cbl-brand-hover: #00E2C8;
+      --cbl-brand-active: #00A994;
+      --cbl-brand-tint: rgba(0, 199, 175, 0.12);
+      --cbl-brand-glow: rgba(0, 199, 175, 0.25);
+
+      --qa-accent: #FF9800;
+      --qa-bg-tint: rgba(255, 152, 0, 0.14);
+
+      --m3-surface: #0E1015;
+      --m3-surface-container: #141720;
+      --m3-surface-container-high: #1A1E29;
+      --m3-outline: #2C3344;
+      --m3-outline-variant: #1E2330;
+      --m3-on-surface: #F3F4F6;
+      --m3-on-surface-variant: #9CA3AF;
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      font-family: 'Roboto', sans-serif;
-      background-color: #080706;
+      font-family: 'Work Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background-color: #07080B;
       color: var(--m3-on-surface);
       min-height: 100vh;
       display: flex;
@@ -2072,15 +2117,32 @@ app.get(QA_PATH, (req, res) => {
       justify-content: center;
       align-items: center;
       padding: 24px 16px;
+      line-height: 1.5;
+      position: relative;
+      overflow-x: hidden;
+    }
+    body::before {
+      content: "";
+      position: absolute;
+      top: -160px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 680px;
+      height: 480px;
+      background: radial-gradient(circle, rgba(255, 152, 0, 0.12) 0%, rgba(7, 8, 11, 0) 70%);
+      pointer-events: none;
+      z-index: 0;
     }
     .card {
+      position: relative;
+      z-index: 1;
       background-color: var(--m3-surface);
-      border: 1px solid var(--m3-outline);
-      border-radius: 28px;
+      border: 1px solid var(--m3-outline-variant);
+      border-radius: 24px;
       padding: 36px;
       max-width: 580px;
       width: 100%;
-      box-shadow: 0 16px 40px rgba(0,0,0,0.8);
+      box-shadow: 0 20px 50px -10px rgba(0,0,0,0.9), 0 0 1px 1px rgba(255, 255, 255, 0.05);
     }
     .badge {
       display: inline-flex;
@@ -2093,9 +2155,12 @@ app.get(QA_PATH, (req, res) => {
       padding: 4px 12px;
       border-radius: 9999px;
       margin-bottom: 12px;
+      border: 1px solid rgba(255, 152, 0, 0.3);
+      letter-spacing: 0.3px;
     }
-    h1 { font-size: 22px; margin-bottom: 8px; color: #fff; }
-    p { font-size: 14px; color: var(--m3-on-surface-variant); margin-bottom: 20px; line-height: 1.5; }
+    h1 { font-size: 22px; font-weight: 600; margin-bottom: 6px; color: #fff; letter-spacing: -0.2px; }
+    p.subtitle { font-size: 13.5px; color: var(--m3-on-surface-variant); margin-bottom: 20px; line-height: 1.5; }
+    
     .info-box {
       background: var(--m3-surface-container);
       border: 1px solid var(--m3-outline-variant);
@@ -2103,74 +2168,169 @@ app.get(QA_PATH, (req, res) => {
       padding: 16px;
       margin-bottom: 20px;
       font-size: 13px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
     }
-    .info-box div { margin-bottom: 6px; }
     .info-box strong { color: #fff; }
+    
     .code-box {
       position: relative;
-      background: #000;
+      background: #050608;
       border: 1px solid var(--m3-outline);
       border-radius: 12px;
-      padding: 14px 50px 14px 14px;
-      font-family: monospace;
+      padding: 14px 52px 14px 14px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
       font-size: 12px;
-      color: #fde047;
+      color: var(--cbl-brand);
       word-break: break-all;
       margin-bottom: 14px;
+      line-height: 1.45;
     }
     .copy-btn {
       position: absolute;
       top: 8px;
       right: 8px;
-      background: var(--qa-accent);
-      color: #fff;
+      background: var(--cbl-brand);
+      color: #07090D;
       border: none;
       border-radius: 8px;
-      width: 36px;
-      height: 36px;
+      width: 38px;
+      height: 38px;
       cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: center;
+      transition: all 0.15s;
     }
+    .copy-btn:hover {
+      background: var(--cbl-brand-hover);
+      transform: scale(1.04);
+    }
+    
+    .field-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 6px;
+    }
+    .field-label {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--m3-on-surface);
+    }
+    .field-direct-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 11.5px;
+      font-weight: 500;
+      color: var(--cbl-brand);
+      text-decoration: none;
+      transition: color 0.15s;
+    }
+    .field-direct-link:hover {
+      color: var(--cbl-brand-hover);
+      text-decoration: underline;
+    }
+    
+    .input-row {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      margin-bottom: 16px;
+    }
+    .input-wrap {
+      position: relative;
+      display: flex;
+      align-items: center;
+      background: var(--m3-surface-container);
+      border: 1px solid var(--m3-outline);
+      border-radius: 12px;
+      min-height: 48px;
+      transition: border-color 0.2s;
+    }
+    .input-wrap:focus-within {
+      border-color: var(--cbl-brand);
+      box-shadow: 0 0 0 3px var(--cbl-brand-glow);
+      background: var(--m3-surface-container-high);
+    }
+    .input-wrap input {
+      width: 100%;
+      background: transparent;
+      border: none;
+      padding: 13px 16px;
+      font-size: 14.5px;
+      color: #fff;
+      outline: none;
+      font-family: inherit;
+    }
+    .input-wrap input::placeholder {
+      color: #5E6678;
+      font-size: 13.5px;
+    }
+    .toggle-pw-btn {
+      background: none;
+      border: none;
+      color: var(--m3-on-surface-variant);
+      cursor: pointer;
+      min-width: 44px;
+      min-height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 8px;
+      margin-right: 4px;
+      transition: color 0.15s;
+    }
+    .toggle-pw-btn:hover {
+      color: #fff;
+    }
+    
     .btn-submit {
       width: 100%;
       min-height: 48px;
-      padding: 12px 20px;
-      background: var(--qa-accent);
-      color: #fff;
+      padding: 13px 20px;
+      background: var(--cbl-brand);
+      color: #07090D;
       border: none;
-      border-radius: 9999px;
-      font-weight: 600;
+      border-radius: 12px;
+      font-weight: 700;
+      font-size: 14.5px;
       cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: center;
       gap: 8px;
-      margin-top: 12px;
+      margin-top: 10px;
+      box-shadow: 0 4px 18px rgba(0, 199, 175, 0.35);
+      transition: all 0.2s;
     }
-    .input-row {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      margin-bottom: 14px;
+    .btn-submit:hover:not(:disabled) {
+      background: var(--cbl-brand-hover);
+      transform: translateY(-1px);
     }
-    input {
-      background: var(--m3-surface-container);
-      border: 1px solid var(--m3-outline);
-      border-radius: 10px;
-      padding: 12px;
-      color: #fff;
-      font-size: 14px;
-      outline: none;
+    .btn-submit:disabled {
+      background: #1F2430;
+      color: #555E70;
+      cursor: not-allowed;
+      box-shadow: none;
     }
-    input:focus { border-color: var(--qa-accent); }
     .tag-secret {
-      background: #3b2a1a;
-      color: #f59e0b;
+      background: rgba(255, 152, 0, 0.15);
+      color: #FFB74D;
       padding: 2px 8px;
       border-radius: 6px;
       font-size: 11px;
+      border: 1px solid rgba(255, 152, 0, 0.3);
+    }
+    .tag-ok {
+      background: var(--cbl-brand-tint);
+      color: var(--cbl-brand);
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-size: 11px;
+      border: 1px solid rgba(0, 199, 175, 0.3);
     }
   </style>
 </head>
@@ -2181,14 +2341,17 @@ app.get(QA_PATH, (req, res) => {
       CANAL PARALELO / QA MCP
     </div>
     <h1>Conector MCP Paralelo (QA)</h1>
-    <p>Este endpoint opera independientemente del MCP principal y utiliza una URL base y credenciales aisladas.</p>
+    <p class="subtitle">Este endpoint opera independientemente del MCP principal y utiliza una URL base y credenciales aisladas para pruebas.</p>
 
     ${hasSecretConfigured && !isAuthorized ? `
-      <div style="background:#2a1b1b; border:1px solid #7f1d1d; border-radius:12px; padding:16px; margin-bottom:16px;">
-        <strong style="color:#f87171;">Acceso Restringido</strong>
-        <p style="margin-top:6px; margin-bottom:12px; font-size:13px;">Se requiere la clave secreta de QA configurada en <code>MCP_QA_SECRET</code> para ver o utilizar este panel.</p>
+      <div style="background:rgba(243, 36, 101, 0.12); border:1px solid #F32465; border-radius:14px; padding:18px; margin-bottom:16px;">
+        <strong style="color:#FF648A; display:flex; align-items:center; gap:6px;">
+          <span class="material-symbols-outlined" style="font-size:18px;">lock</span>
+          Acceso Restringido
+        </strong>
+        <p style="margin-top:6px; margin-bottom:14px; font-size:13px; color:#E5E7EB;">Se requiere la clave secreta de QA configurada en <code>MCP_QA_SECRET</code> para ver o utilizar este panel.</p>
         <form method="GET" action="${QA_PATH}">
-          <div class="input-row">
+          <div class="input-wrap" style="margin-bottom:12px;">
             <input type="password" name="key" placeholder="Ingresa MCP_QA_SECRET" required>
           </div>
           <button type="submit" class="btn-submit">Validar Acceso</button>
@@ -2196,9 +2359,9 @@ app.get(QA_PATH, (req, res) => {
       </div>
     ` : `
       <div class="info-box">
-        <div><strong>URL Base Contabilium API:</strong> ${qaBaseUrl}</div>
+        <div><strong>URL Base Contabilium API:</strong> <code style="color:var(--cbl-brand);">${qaBaseUrl}</code></div>
         <div><strong>Ruta MCP Paralela:</strong> <code>${QA_PATH}/mcp</code></div>
-        <div><strong>Autenticación en Vercel:</strong> ${hasServerCredentials ? '<span style="color:#4ade80;">Credenciales Fijas Configuradas</span>' : '<span style="color:#fbbf24;">Requiere Token Cifrado (?auth=)</span>'}</div>
+        <div><strong>Autenticación en Vercel:</strong> ${hasServerCredentials ? '<span class="tag-ok">Credenciales Fijas Configuradas</span>' : '<span style="color:#fbbf24;">Requiere Token Cifrado (?auth=)</span>'}</div>
         ${hasSecretConfigured ? '<div><strong>Protección de Secreto:</strong> <span class="tag-secret">Activa</span></div>' : ''}
       </div>
 
@@ -2207,36 +2370,76 @@ app.get(QA_PATH, (req, res) => {
           <label style="font-size:13px; font-weight:600; color:#fff; display:block; margin-bottom:6px;">URL de Conexión Directa (Streamable HTTP):</label>
           <div class="code-box">
             <span id="directUrl">${directMcpUrl}</span>
-            <button class="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById('directUrl').innerText); alert('URL Copiada');" title="Copiar URL">
-              <span class="material-symbols-outlined">content_copy</span>
+            <button class="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById('directUrl').innerText); alert('URL Copiada al portapapeles');" title="Copiar URL">
+              <span class="material-symbols-outlined" style="font-size:18px;">content_copy</span>
             </button>
           </div>
         </div>
       ` : `
-        <div style="font-size:13px; margin-bottom:10px; color:#fff;"><strong>Generar Token Cifrado para QA:</strong></div>
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+          <span style="font-size:13px; font-weight:600; color:#fff;">Generar Token Cifrado para QA:</span>
+          <a href="https://app.contabilium.com/modulos/miCuenta/api.aspx" target="_blank" rel="noopener noreferrer" class="field-direct-link" title="Obtener credenciales en el panel de Contabilium">
+            <span>Mi cuenta - API - Credenciales</span>
+            <span class="material-symbols-outlined" style="font-size:14px;">open_in_new</span>
+          </a>
+        </div>
+        
         <form id="qaTokenForm">
           <div class="input-row">
-            <input type="email" id="qaClientId" placeholder="Email de API (QA)" required>
+            <div class="field-row">
+              <label class="field-label" for="qaClientId">Email de API (QA)</label>
+            </div>
+            <div class="input-wrap">
+              <input type="email" id="qaClientId" placeholder="usuario@empresa.com" required autocomplete="email">
+            </div>
           </div>
+          
           <div class="input-row">
-            <input type="password" id="qaClientSecret" placeholder="API Key Privada (QA)" required>
+            <div class="field-row">
+              <label class="field-label" for="qaClientSecret">API Key Privada (QA)</label>
+            </div>
+            <div class="input-wrap">
+              <input type="password" id="qaClientSecret" placeholder="Tu API Key de Contabilium" required autocomplete="current-password">
+              <button type="button" class="toggle-pw-btn" id="qaTogglePw" aria-label="Mostrar contraseña">
+                <span class="material-symbols-outlined" id="qaToggleIcon" style="font-size:20px;">visibility</span>
+              </button>
+            </div>
           </div>
-          <button type="submit" class="btn-submit" id="btnGenQa">Generar URL QA</button>
+          
+          <button type="submit" class="btn-submit" id="btnGenQa">
+            <span class="material-symbols-outlined" style="font-size:18px;">key</span>
+            <span>Generar URL QA</span>
+          </button>
         </form>
-        <div id="qaResult" style="display:none; margin-top:16px;">
+        
+        <div id="qaResult" style="display:none; margin-top:20px;">
+          <label style="font-size:12px; font-weight:600; color:#fff; display:block; margin-bottom:6px;">URL MCP Generada con Token Cifrado:</label>
           <div class="code-box">
             <span id="qaGeneratedUrl"></span>
-            <button class="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById('qaGeneratedUrl').innerText); alert('URL Copiada');" title="Copiar URL">
-              <span class="material-symbols-outlined">content_copy</span>
+            <button class="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById('qaGeneratedUrl').innerText); alert('URL Copiada al portapapeles');" title="Copiar URL">
+              <span class="material-symbols-outlined" style="font-size:18px;">content_copy</span>
             </button>
           </div>
         </div>
+        
         <script>
+          const qaPwInput = document.getElementById('qaClientSecret');
+          const qaTogglePw = document.getElementById('qaTogglePw');
+          const qaToggleIcon = document.getElementById('qaToggleIcon');
+          
+          if (qaTogglePw && qaPwInput) {
+            qaTogglePw.addEventListener('click', () => {
+              const isPw = qaPwInput.type === 'password';
+              qaPwInput.type = isPw ? 'text' : 'password';
+              qaToggleIcon.innerText = isPw ? 'visibility_off' : 'visibility';
+            });
+          }
+          
           document.getElementById('qaTokenForm')?.addEventListener('submit', async (e) => {
             e.preventDefault();
             const btn = document.getElementById('btnGenQa');
             btn.disabled = true;
-            btn.innerText = 'Verificando con Contabilium QA...';
+            btn.innerHTML = '<span class=\"material-symbols-outlined\" style=\"animation:spin 1s infinite linear; font-size:18px;\">sync</span><span>Verificando con Contabilium QA...</span>';
             try {
               const res = await fetch('/api/generate-token', {
                 method: 'POST',
@@ -2259,7 +2462,7 @@ app.get(QA_PATH, (req, res) => {
               alert('Error de conexión: ' + err.message);
             } finally {
               btn.disabled = false;
-              btn.innerText = 'Generar URL QA';
+              btn.innerHTML = '<span class=\"material-symbols-outlined\" style=\"font-size:18px;\">key</span><span>Generar URL QA</span>';
             }
           });
         </script>
