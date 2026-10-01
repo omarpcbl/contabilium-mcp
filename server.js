@@ -915,13 +915,423 @@ app.get("/", (req, res) => {
       to { bottom: 0; opacity: 0; }
     }
 
+    /* Trigger de Guía de Conexión en Header */
+    .btn-help-trigger {
+      background: var(--m3-surface-container);
+      border: 1px solid var(--m3-outline);
+      color: var(--m3-on-surface);
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 500;
+      padding: 6px 14px;
+      border-radius: 9999px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s var(--m3-motion-standard);
+      flex-shrink: 0;
+      min-height: 38px;
+    }
+
+    .btn-help-trigger:hover {
+      background: var(--m3-surface-container-high);
+      border-color: var(--cbl-highlight);
+      color: #ffffff;
+      transform: translateY(-1px);
+    }
+
+    .btn-help-trigger .material-symbols-outlined {
+      font-size: 18px;
+      color: var(--cbl-highlight-hover);
+    }
+
+    /* Footer link de ayuda secundaria */
+    .card-help-footer {
+      margin-top: 18px;
+      text-align: center;
+      padding-top: 12px;
+      border-top: 1px dashed var(--m3-outline-variant);
+    }
+
+    .help-link-action {
+      background: none;
+      border: none;
+      color: var(--m3-on-surface-variant);
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 8px 14px;
+      border-radius: 8px;
+      transition: color 0.15s, background-color 0.15s;
+    }
+
+    .help-link-action:hover {
+      color: var(--cbl-highlight-hover);
+      background: rgba(76, 70, 198, 0.08);
+    }
+
+    .help-link-action .material-symbols-outlined {
+      font-size: 18px;
+    }
+
+    /* Modal Backdrop M3 (Oculto por defecto) */
+    .help-modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.78);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      padding: 20px 16px;
+      animation: modalFadeIn 0.2s var(--m3-motion-standard);
+    }
+
+    @keyframes modalFadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    /* Modal Card M3 */
+    .help-modal-card {
+      background: var(--m3-surface);
+      border: 1px solid var(--m3-outline);
+      border-radius: 28px;
+      max-width: 660px;
+      width: 100%;
+      max-height: 88vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.9), 0 0 1px 1px rgba(255, 255, 255, 0.08);
+      animation: modalScaleUp 0.25s var(--m3-motion-standard);
+    }
+
+    @keyframes modalScaleUp {
+      from { opacity: 0; transform: scale(0.95); }
+      to { opacity: 1; transform: scale(1); }
+    }
+
+    .help-modal-header {
+      padding: 24px 28px 18px;
+      border-bottom: 1px solid var(--m3-outline-variant);
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      background: var(--m3-surface-container);
+    }
+
+    .help-modal-title-wrap {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+    }
+
+    .help-icon-badge {
+      width: 44px;
+      height: 44px;
+      border-radius: 14px;
+      background: var(--cbl-highlight-bg);
+      color: var(--cbl-highlight);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .help-icon-badge .material-symbols-outlined {
+      font-size: 24px;
+    }
+
+    .help-modal-header h2 {
+      font-size: 19px;
+      font-weight: 600;
+      color: #ffffff;
+      line-height: 1.3;
+      margin-bottom: 4px;
+    }
+
+    .help-modal-subtitle {
+      font-size: 13px;
+      color: var(--m3-on-surface-variant);
+      line-height: 1.4;
+    }
+
+    .btn-close-modal {
+      background: transparent;
+      border: none;
+      color: var(--m3-on-surface-variant);
+      min-width: 44px;
+      min-height: 44px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .btn-close-modal:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: #ffffff;
+    }
+
+    .btn-close-modal .material-symbols-outlined {
+      font-size: 22px;
+    }
+
+    .help-modal-body {
+      padding: 24px 28px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+    }
+
+    /* Pasos de Ayuda */
+    .help-step-item {
+      display: flex;
+      gap: 16px;
+      align-items: flex-start;
+    }
+
+    .step-indicator {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: var(--cbl-highlight);
+      color: #ffffff;
+      font-weight: 700;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      box-shadow: 0 2px 8px rgba(76, 70, 198, 0.35);
+      margin-top: 2px;
+    }
+
+    .step-content {
+      flex: 1;
+    }
+
+    .step-content h3 {
+      font-size: 15px;
+      font-weight: 600;
+      color: #ffffff;
+      margin-bottom: 6px;
+    }
+
+    .step-content p {
+      font-size: 13px;
+      color: var(--m3-on-surface-variant);
+      line-height: 1.5;
+      margin-bottom: 8px;
+    }
+
+    .step-note {
+      background: var(--m3-surface-container);
+      border: 1px solid var(--m3-outline-variant);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 12px;
+      color: var(--m3-on-surface);
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      margin-top: 6px;
+    }
+
+    .step-note .material-symbols-outlined {
+      font-size: 18px;
+      color: var(--cbl-warning-accent);
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    /* Tabs de clientes en el paso 3 */
+    .client-tabs-nav {
+      display: flex;
+      gap: 6px;
+      background: var(--m3-surface-container);
+      border-radius: 10px;
+      padding: 4px;
+      margin: 12px 0 10px;
+      border: 1px solid var(--m3-outline-variant);
+    }
+
+    .client-tab {
+      flex: 1;
+      background: transparent;
+      border: none;
+      color: var(--m3-on-surface-variant);
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 500;
+      padding: 8px 10px;
+      min-height: 38px;
+      border-radius: 8px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.15s;
+    }
+
+    .client-tab.active {
+      background: var(--cbl-highlight-bg);
+      color: var(--cbl-highlight);
+      font-weight: 600;
+    }
+
+    .client-tab:hover:not(.active) {
+      color: #ffffff;
+      background: rgba(255, 255, 255, 0.05);
+    }
+
+    .client-tab-panel {
+      background: var(--m3-surface-container);
+      border: 1px solid var(--m3-outline-variant);
+      border-radius: 12px;
+      padding: 14px 16px;
+      animation: fadeIn 0.2s ease-out;
+    }
+
+    .client-instructions-list {
+      padding-left: 20px;
+      margin: 0;
+      font-size: 12px;
+      color: var(--m3-on-surface-variant);
+      line-height: 1.6;
+    }
+
+    .client-instructions-list li {
+      margin-bottom: 6px;
+    }
+
+    .client-instructions-list strong {
+      color: var(--m3-on-surface);
+    }
+
+    .client-instructions-list code,
+    .help-code-block code {
+      background: #000000;
+      padding: 2px 6px;
+      border-radius: 6px;
+      font-size: 11px;
+      color: #93c5fd;
+      border: 1px solid var(--m3-outline);
+      font-family: monospace;
+    }
+
+    .help-code-block {
+      background: #000000;
+      border: 1px solid var(--m3-outline);
+      border-radius: 10px;
+      padding: 12px;
+      margin: 0;
+      overflow-x: auto;
+      font-size: 11px;
+      line-height: 1.4;
+      color: #93c5fd;
+    }
+
+    /* Capabilities Box */
+    .help-capabilities-box {
+      background: var(--m3-surface-container);
+      border: 1px solid var(--m3-outline-variant);
+      border-radius: 14px;
+      padding: 16px;
+    }
+
+    .help-capabilities-box h4 {
+      font-size: 13px;
+      font-weight: 600;
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+
+    .help-capabilities-box h4 .material-symbols-outlined {
+      font-size: 18px;
+      color: var(--cbl-success-accent);
+    }
+
+    .capabilities-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .cap-pill {
+      background: var(--m3-surface-container-high);
+      border: 1px solid var(--m3-outline);
+      color: var(--m3-on-surface);
+      font-size: 12px;
+      padding: 6px 12px;
+      border-radius: 9999px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .cap-pill .material-symbols-outlined {
+      font-size: 15px;
+      color: var(--cbl-highlight-hover);
+    }
+
+    /* Footer Modal */
+    .help-modal-footer {
+      padding: 16px 28px 20px;
+      border-top: 1px solid var(--m3-outline-variant);
+      display: flex;
+      justify-content: flex-end;
+      background: var(--m3-surface-container);
+    }
+
+    .btn-help-primary {
+      background: var(--cbl-highlight);
+      color: #ffffff;
+      border: none;
+      border-radius: 9999px;
+      padding: 12px 24px;
+      font-family: inherit;
+      font-weight: 600;
+      font-size: 14px;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      cursor: pointer;
+      min-height: 44px;
+      transition: background-color 0.15s, transform 0.15s;
+    }
+
+    .btn-help-primary:hover {
+      background: var(--cbl-highlight-hover);
+      transform: translateY(-1px);
+    }
+
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after {
         animation-duration: 0.01ms !important;
         animation-iteration-count: 1 !important;
         transition-duration: 0.01ms !important;
       }
-      .btn-submit:hover:not(:disabled) {
+      .btn-submit:hover:not(:disabled),
+      .btn-help-primary:hover,
+      .btn-help-trigger:hover {
         transform: none !important;
       }
     }
@@ -933,6 +1343,26 @@ app.get("/", (req, res) => {
       }
       h1 {
         font-size: 20px;
+      }
+      .help-modal-card {
+        max-height: 94vh;
+        border-radius: 20px;
+      }
+      .help-modal-header,
+      .help-modal-body,
+      .help-modal-footer {
+        padding: 18px 16px;
+      }
+      .client-tabs-nav {
+        flex-direction: column;
+      }
+      .help-btn-text {
+        display: none;
+      }
+      .btn-help-trigger {
+        padding: 8px;
+        min-width: 38px;
+        justify-content: center;
       }
     }
   </style>
@@ -954,6 +1384,12 @@ app.get("/", (req, res) => {
         </div>
         <p class="subtitle">Conecta tu cuenta de Contabilium con asistentes y herramientas de IA mediante el protocolo estándar MCP.</p>
       </div>
+
+      <!-- Trigger para abrir la Guía de Conexión -->
+      <button type="button" class="btn-help-trigger" id="openHelpBtn" aria-haspopup="dialog" aria-controls="helpModal" title="¿Cómo conectar este servidor MCP?">
+        <span class="material-symbols-outlined">help</span>
+        <span class="help-btn-text">¿Cómo conectar?</span>
+      </button>
     </header>
 
     <!-- Formulario M3 Accesible -->
@@ -1057,7 +1493,134 @@ app.get("/", (req, res) => {
         <strong>Seguridad y Privacidad:</strong> Tus credenciales se cifran con <strong>AES-256-GCM</strong> y nunca se exponen en texto plano ante el modelo de IA ni terceros.
       </div>
     </aside>
+
+    <!-- Enlace secundario de ayuda al pie -->
+    <div class="card-help-footer">
+      <button type="button" class="help-link-action" id="openHelpBtnFooter" aria-haspopup="dialog" aria-controls="helpModal">
+        <span class="material-symbols-outlined">menu_book</span>
+        <span>¿Primera vez conectando este MCP? Ver guía paso a paso</span>
+      </button>
+    </div>
   </main>
+
+  <!-- Modal Dialog de Ayuda M3 (Oculto por defecto) -->
+  <div class="help-modal-backdrop" id="helpModal" role="dialog" aria-modal="true" aria-labelledby="helpModalTitle" style="display:none;">
+    <div class="help-modal-card">
+      <div class="help-modal-header">
+        <div class="help-modal-title-wrap">
+          <div class="help-icon-badge" aria-hidden="true">
+            <span class="material-symbols-outlined">auto_stories</span>
+          </div>
+          <div>
+            <h2 id="helpModalTitle">¿Cómo conectar este servidor MCP?</h2>
+            <p class="help-modal-subtitle">Aprende a conectar Contabilium con cualquier cliente o asistente de IA compatible en 3 simples pasos.</p>
+          </div>
+        </div>
+        <button type="button" class="btn-close-modal" id="closeHelpBtn" aria-label="Cerrar guía de conexión">
+          <span class="material-symbols-outlined" aria-hidden="true">close</span>
+        </button>
+      </div>
+
+      <div class="help-modal-body">
+        <!-- Paso 1 -->
+        <div class="help-step-item">
+          <div class="step-indicator" aria-hidden="true">1</div>
+          <div class="step-content">
+            <h3>Obtén tus claves de API en Contabilium</h3>
+            <p>Ingresa a tu cuenta de Contabilium con tu usuario habitual y dirígete a:
+              <br><strong>Mi Cuenta &gt; Integraciones &gt; API</strong>.
+            </p>
+            <div class="step-note">
+              <span class="material-symbols-outlined" aria-hidden="true">info</span>
+              <span>Copia tu <strong>Email de API</strong> (client_id) y tu <strong>API Key Privada</strong> (client_secret).</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Paso 2 -->
+        <div class="help-step-item">
+          <div class="step-indicator" aria-hidden="true">2</div>
+          <div class="step-content">
+            <h3>Genera tu URL de conexión en este portal</h3>
+            <p>Ingresa tus credenciales en el formulario principal, selecciona tu país y haz clic en <strong>Verificar y Conectar</strong>.</p>
+            <p>El portal validará tus credenciales y generará una <strong>URL cifrada única</strong> (AES-256-GCM) para tu sesión de Model Context Protocol.</p>
+          </div>
+        </div>
+
+        <!-- Paso 3 -->
+        <div class="help-step-item">
+          <div class="step-indicator" aria-hidden="true">3</div>
+          <div class="step-content">
+            <h3>Configura tu cliente o asistente de IA</h3>
+            <p>Copia la URL generada y agrégala a tu herramienta de IA según tu entorno:</p>
+
+            <div class="client-tabs-nav" role="tablist" aria-label="Instrucciones por cliente">
+              <button type="button" class="client-tab active" id="tabClientApps" role="tab" aria-selected="true" onclick="switchClientHelpTab('apps')">
+                <span class="material-symbols-outlined" aria-hidden="true">apps</span>
+                Claude / Apps
+              </button>
+              <button type="button" class="client-tab" id="tabClientIde" role="tab" aria-selected="false" onclick="switchClientHelpTab('ide')">
+                <span class="material-symbols-outlined" aria-hidden="true">code</span>
+                Cursor / Windsurf / IDEs
+              </button>
+              <button type="button" class="client-tab" id="tabClientConfig" role="tab" aria-selected="false" onclick="switchClientHelpTab('config')">
+                <span class="material-symbols-outlined" aria-hidden="true">terminal</span>
+                Archivo JSON / Stdio
+              </button>
+            </div>
+
+            <div class="client-tab-panel" id="panelClientApps">
+              <ol class="client-instructions-list">
+                <li>Abre tu cliente de IA y dirígete a <strong>Ajustes &gt; Conectores</strong> (o <em>Developer Settings</em>).</li>
+                <li>Haz clic en <strong>Add Custom Connector (Agregar conector)</strong>.</li>
+                <li>Asigna un nombre (ej. <code>Contabilium</code>) y pega la <strong>URL Streamable HTTP</strong> generada.</li>
+                <li>Guarda y verifica que el conector quede activo con todas las herramientas habilitadas.</li>
+              </ol>
+            </div>
+
+            <div class="client-tab-panel" id="panelClientIde" style="display:none;">
+              <ol class="client-instructions-list">
+                <li>En Cursor, Windsurf o VS Code, abre <strong>Settings &gt; Features &gt; MCP Servers</strong>.</li>
+                <li>Haz clic en <strong>Add new MCP server</strong>.</li>
+                <li>Selecciona el transporte tipo <strong>Streamable HTTP</strong> o <strong>SSE</strong> y pega tu URL cifrada.</li>
+                <li>Guarda y comprueba el indicador verde de conexión activa.</li>
+              </ol>
+            </div>
+
+            <div class="client-tab-panel" id="panelClientConfig" style="display:none;">
+              <p style="font-size:12px; margin-bottom:8px; color:var(--m3-on-surface-variant);">Si tu entorno utiliza un archivo de configuración <code>claude_desktop_config.json</code> o <code>mcp.json</code>, puedes agregar:</p>
+              <pre class="help-code-block"><code>{
+  "mcpServers": {
+    "contabilium": {
+      "url": "&lt;URL_GENERADA_AQUI&gt;"
+    }
+  }
+}</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <!-- Capacidades de la IA -->
+        <div class="help-capabilities-box">
+          <h4><span class="material-symbols-outlined" aria-hidden="true">verified</span> ¿Qué podrá resolver tu IA una vez conectada?</h4>
+          <div class="capabilities-grid">
+            <span class="cap-pill"><span class="material-symbols-outlined" aria-hidden="true">inventory_2</span> Stock por depósito</span>
+            <span class="cap-pill"><span class="material-symbols-outlined" aria-hidden="true">search</span> Catálogo de productos y precios</span>
+            <span class="cap-pill"><span class="material-symbols-outlined" aria-hidden="true">receipt_long</span> Listado y estado de comprobantes</span>
+            <span class="cap-pill"><span class="material-symbols-outlined" aria-hidden="true">account_balance_wallet</span> Cuentas corrientes por cobrar</span>
+            <span class="cap-pill"><span class="material-symbols-outlined" aria-hidden="true">group</span> Consulta de clientes y datos fiscales</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="help-modal-footer">
+        <button type="button" class="btn-help-primary" id="closeHelpBtnAction">
+          <span class="material-symbols-outlined" aria-hidden="true">check</span>
+          <span>Entendido, volver al conector</span>
+        </button>
+      </div>
+    </div>
+  </div>
 
   <!-- Toast Snackbar -->
   <div id="snackbar" class="snackbar" role="status" aria-live="polite">
@@ -1089,9 +1652,76 @@ app.get("/", (req, res) => {
     const snackbar = document.getElementById("snackbar");
     const snackbarText = document.getElementById("snackbarText");
 
+    // Elementos del Modal de Ayuda
+    const helpModal = document.getElementById("helpModal");
+    const openHelpBtn = document.getElementById("openHelpBtn");
+    const openHelpBtnFooter = document.getElementById("openHelpBtnFooter");
+    const closeHelpBtn = document.getElementById("closeHelpBtn");
+    const closeHelpBtnAction = document.getElementById("closeHelpBtnAction");
+    let lastActiveTrigger = null;
+
     let currentStreamableUrl = "";
     let currentSseUrl = "";
     let activeTab = "streamable";
+
+    // Funciones de Apertura / Cierre de Guía
+    function openHelpModal(triggerEl) {
+      lastActiveTrigger = triggerEl || openHelpBtn;
+      helpModal.style.display = "flex";
+      document.body.style.overflow = "hidden";
+      closeHelpBtn.focus();
+    }
+
+    function closeHelpModal() {
+      helpModal.style.display = "none";
+      document.body.style.overflow = "";
+      if (lastActiveTrigger) {
+        lastActiveTrigger.focus();
+      }
+    }
+
+    openHelpBtn.addEventListener("click", () => openHelpModal(openHelpBtn));
+    openHelpBtnFooter.addEventListener("click", () => openHelpModal(openHelpBtnFooter));
+    closeHelpBtn.addEventListener("click", closeHelpModal);
+    closeHelpBtnAction.addEventListener("click", () => {
+      closeHelpModal();
+      clientIdInput.focus();
+    });
+
+    // Cerrar al hacer clic en el backdrop exterior
+    helpModal.addEventListener("click", (e) => {
+      if (e.target === helpModal) {
+        closeHelpModal();
+      }
+    });
+
+    // Cerrar con Escape
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && helpModal.style.display === "flex") {
+        closeHelpModal();
+      }
+    });
+
+    // Pestañas de ayuda por cliente
+    function switchClientHelpTab(clientKey) {
+      const tabs = {
+        apps: { tab: document.getElementById("tabClientApps"), panel: document.getElementById("panelClientApps") },
+        ide: { tab: document.getElementById("tabClientIde"), panel: document.getElementById("panelClientIde") },
+        config: { tab: document.getElementById("tabClientConfig"), panel: document.getElementById("panelClientConfig") }
+      };
+
+      Object.keys(tabs).forEach(k => {
+        if (k === clientKey) {
+          tabs[k].tab.classList.add("active");
+          tabs[k].tab.setAttribute("aria-selected", "true");
+          tabs[k].panel.style.display = "block";
+        } else {
+          tabs[k].tab.classList.remove("active");
+          tabs[k].tab.setAttribute("aria-selected", "false");
+          tabs[k].panel.style.display = "none";
+        }
+      });
+    }
 
     // Toggle de visibilidad de password con aria-pressed y aria-label
     togglePasswordBtn.addEventListener("click", () => {
@@ -1213,7 +1843,7 @@ app.get("/", (req, res) => {
           currentSseUrl = data.sseUrl || data.url.replace("/mcp?", "/sse?");
           
           companyInfo.innerHTML = "<div><strong>Razón Social:</strong> " + escapeHtml(data.empresa) + "</div>" +
-            (data.cuit ? "<div><strong>Identificación Fiscal (CUIT/RUT):</strong> " + escapeHtml(data.cuit) + "</div>" : "") +
+            (data.cuit ? "<div><strong>Identificación Fiscal:</strong> " + escapeHtml(data.cuit) + "</div>" : "") +
             "<div><strong>Región:</strong> " + escapeHtml(data.pais) + "</div>";
           
           switchUrlTab("streamable");
