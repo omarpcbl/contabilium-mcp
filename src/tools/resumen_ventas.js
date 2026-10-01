@@ -1,10 +1,25 @@
 import { z } from "zod";
-import { classifyFiscalInvoice, diffDays, formatCurrency, formatToolResponse, getIsoWeek, getYearMonth, parseAmount, subDays } from "../utils.js";
+import {
+  classifyFiscalInvoice,
+  diffDays,
+  formatCurrency,
+  formatIsoWeekLabel,
+  formatToolResponse,
+  formatYearMonthLabel,
+  getIsoWeek,
+  getYearMonth,
+  parseAmount,
+  renderProgressBar,
+  subDays,
+} from "../utils.js";
 
 export const schema = {
   fecha_desde: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD requerido").describe("Fecha inicial de ventas (YYYY-MM-DD)."),
   fecha_hasta: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD requerido").describe("Fecha final de ventas (YYYY-MM-DD)."),
-  agrupar_por: z.enum(["mes", "semana", "cliente", "producto", "rubro", "origen"]).default("mes").describe("Criterio de agrupación de las ventas."),
+  agrupar_por: z
+    .enum(["dia", "mes", "semana", "cliente", "producto", "rubro", "origen"])
+    .default("mes")
+    .describe("Criterio de agrupación de las ventas: dia, mes, semana, cliente, producto, rubro u origen."),
   top: z.number().int().min(1).max(50).default(10).describe("Cantidad de filas principales a devolver (default 10)."),
   comparar_con_periodo_anterior: z.boolean().default(false).describe("Si es true, compara contra el período previo de igual duración."),
 };
@@ -73,17 +88,22 @@ export async function handler({ fecha_desde, fecha_hasta, agrupar_por, top, comp
       // Sanitización de cliente: excluir espacios vacíos y unificar Consumidor Final (BUG-13)
       let clienteRaw = String(c.RazonSocial || c.razonSocial || "").trim();
       let clienteIdentificador = clienteRaw.length > 0 && clienteRaw !== "0" && clienteRaw !== "-1" ? clienteRaw : "Consumidor Final";
-      
-      // Agregar a clientes únicos solo si es una identidad comercial o cliente no anónimo
+
       if (clienteIdentificador !== "Consumidor Final" && clienteIdentificador !== "Sin cliente informado") {
         clientesUnicosGeneral.add(clienteIdentificador);
       }
 
       let key = "Varios";
-      if (agrupar_por === "mes") {
+      let etiquetaPeriodo = null;
+      if (agrupar_por === "dia") {
+        key = fechaComp || "Sin fecha";
+        etiquetaPeriodo = key;
+      } else if (agrupar_por === "mes") {
         key = getYearMonth(c.FechaEmision || c.fechaEmision);
+        etiquetaPeriodo = formatYearMonthLabel(key); // MEJ-15
       } else if (agrupar_por === "semana") {
         key = getIsoWeek(c.FechaEmision || c.fechaEmision);
+        etiquetaPeriodo = formatIsoWeekLabel(key); // MEJ-15
       } else if (agrupar_por === "cliente") {
         key = clienteIdentificador;
       } else if (agrupar_por === "origen") {
@@ -99,6 +119,7 @@ export async function handler({ fecha_desde, fecha_hasta, agrupar_por, top, comp
       if (agrupar_por !== "producto" && agrupar_por !== "rubro") {
         const g = grupos.get(key) || {
           grupo: key,
+          etiqueta_periodo: etiquetaPeriodo || key,
           cantidad_comprobantes: 0,
           cantidad_facturas: 0,
           cantidad_nc: 0,
@@ -126,6 +147,7 @@ export async function handler({ fecha_desde, fecha_hasta, agrupar_por, top, comp
           const fallbackKey = "Ítems no detallados";
           const g = grupos.get(fallbackKey) || {
             grupo: fallbackKey,
+            etiqueta_periodo: fallbackKey,
             cantidad_comprobantes: 0,
             cantidad_facturas: 0,
             cantidad_nc: 0,
@@ -163,6 +185,7 @@ export async function handler({ fecha_desde, fecha_hasta, agrupar_por, top, comp
 
             const g = grupos.get(prodKey) || {
               grupo: prodKey,
+              etiqueta_periodo: prodKey,
               cantidad_comprobantes: 0,
               cantidad_facturas: 0,
               cantidad_nc: 0,
@@ -191,7 +214,8 @@ export async function handler({ fecha_desde, fecha_hasta, agrupar_por, top, comp
 
     const totalNeto = totalFacturado - totalNotasCredito;
     const ticketPromedio = cantidadFacturasGeneral > 0 ? Math.round((totalFacturado / cantidadFacturasGeneral) * 100) / 100 : 0;
-    const conteoClientesUnicos = clientesUnicosGeneral.size === 0 && (cantidadFacturasGeneral > 0 || cantidadNcGeneral > 0) ? 1 : clientesUnicosGeneral.size;
+    const conteoClientesUnicos =
+      clientesUnicosGeneral.size === 0 && (cantidadFacturasGeneral > 0 || cantidadNcGeneral > 0) ? 1 : clientesUnicosGeneral.size;
 
     return {
       grupos,
@@ -225,13 +249,18 @@ export async function handler({ fecha_desde, fecha_hasta, agrupar_por, top, comp
     anteriorData = procesarComprobantes(anteriorRes.items);
   }
 
+  // Determinar valor máximo para las barras visuales (MEJ-16)
+  const maxTotalFila = Math.max(1, ...Array.from(actualData.grupos.values()).map((g) => Math.max(0, g.total)));
+
   // Ordenar grupos por total descendente
   const sortedGrupos = Array.from(actualData.grupos.values())
     .map((g) => {
       const ticketPromedioGrupo = g.cantidad_facturas > 0 ? Math.round((g.total_facturado / g.cantidad_facturas) * 100) / 100 : 0;
       const fila = {
         grupo: g.grupo,
+        etiqueta_periodo: g.etiqueta_periodo || g.grupo,
         total: Math.round(g.total * 100) / 100,
+        barra_visual: renderProgressBar(g.total, maxTotalFila, 10), // MEJ-16: visualización segura sin riesgo de rotura
         total_facturado: Math.round(g.total_facturado * 100) / 100,
         total_notas_credito: Math.round(g.total_notas_credito * 100) / 100,
         cantidad_facturas: g.cantidad_facturas,
@@ -246,7 +275,6 @@ export async function handler({ fecha_desde, fecha_hasta, agrupar_por, top, comp
         const prevG = anteriorData.grupos.get(g.grupo);
         const totalAnt = prevG ? Math.round(prevG.total * 100) / 100 : 0;
         fila.total_anterior = totalAnt;
-        // Si hay datos truncados, no calcular porcentajes engañosos (BUG-12)
         fila.variacion_pct =
           truncadoTotal || totalAnt === 0 ? null : Math.round(((fila.total - totalAnt) / Math.abs(totalAnt)) * 1000) / 10;
       }
@@ -257,7 +285,6 @@ export async function handler({ fecha_desde, fecha_hasta, agrupar_por, top, comp
     .slice(0, top);
 
   const advertencias = [
-    // Siempre responder que se excluyen cotizaciones (Requerimiento explícito del usuario)
     "Se excluyen cotizaciones (COT/NCT), presupuestos y comprobantes no fiscales de los totales de venta.",
   ];
 
@@ -304,7 +331,6 @@ export async function handler({ fecha_desde, fecha_hasta, agrupar_por, top, comp
         ...(anteriorData
           ? {
               total_anterior: anteriorData.totalNeto,
-              // Si está truncado, anular variación (BUG-12)
               variacion_total_pct:
                 truncadoTotal || anteriorData.totalNeto === 0
                   ? null
@@ -313,6 +339,12 @@ export async function handler({ fecha_desde, fecha_hasta, agrupar_por, top, comp
           : {}),
       },
       filas: sortedGrupos,
+      // Datos normalizados listos para componentes visuales o gráficas (MEJ-16)
+      grafico: {
+        tipo: "barras",
+        eje_x: sortedGrupos.map((f) => f.etiqueta_periodo || f.grupo),
+        eje_y: sortedGrupos.map((f) => f.total),
+      },
     },
     resumen,
     advertencias,

@@ -6,6 +6,7 @@ import * as listarVentas from "./tools/listar_ventas.js";
 import * as resumenVentas from "./tools/resumen_ventas.js";
 import * as stockPorDeposito from "./tools/stock_por_deposito.js";
 import * as cuentasPorCobrar from "./tools/cuentas_por_cobrar.js";
+import * as quePuedoConsultar from "./tools/que_puedo_consultar.js";
 import * as crearBorradorFactura from "./tools/crear_borrador_factura.js";
 import * as autorizarFacturaElectronica from "./tools/autorizar_factura_electronica.js";
 import * as emitirFacturaExpress from "./tools/emitir_factura_express.js";
@@ -14,12 +15,29 @@ import * as registrarConsultaNoSoportada from "./tools/registrar_consulta_no_sop
 import { z } from "zod";
 
 /**
- * Registra las herramientas del servidor MCP de Contabilium
+ * Registra las herramientas y prompts del servidor MCP de Contabilium
  * 
  * @param {import("@modelcontextprotocol/sdk/server/mcp.js").McpServer} server 
  * @param {import("./contabilium-client.js").ContabiliumClient} client 
  */
 export function registerContabiliumTools(server, client) {
+  // 0. que_puedo_consultar (MEJ-12: Onboarding interactivo y capacidades)
+  server.tool(
+    "que_puedo_consultar",
+    "Guía de asistencia y bienvenida: explica qué módulos y consultas están disponibles (ventas, stock, cobranzas), sus límites operacionales y ofrece preguntas sugeridas listas para ejecutar.",
+    quePuedoConsultar.schema,
+    async (args) => {
+      try {
+        return await quePuedoConsultar.handler(args, client);
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ error: err.message, datos: null, resumen: "Error al obtener guía", advertencias: [err.message], truncado: false }, null, 2) }],
+          isError: true,
+        };
+      }
+    }
+  );
+
   // 1. buscar_clientes
   server.tool(
     "buscar_clientes",
@@ -105,10 +123,10 @@ export function registerContabiliumTools(server, client) {
     }
   );
 
-  // 6. resumen_ventas
+  // 6. resumen_ventas (MEJ-14: descripción armonizada con schema)
   server.tool(
     "resumen_ventas",
-    "Totaliza ventas por período, agrupables por día, semana, mes o cliente. Calcula totales facturados y cantidad de operaciones.",
+    "Totaliza ventas por período, agrupables por día, mes, semana, cliente, producto, rubro u origen. Resta notas de crédito y excluye cotizaciones.",
     resumenVentas.schema,
     async (args) => {
       try {
@@ -125,7 +143,7 @@ export function registerContabiliumTools(server, client) {
   // 7. stock_por_deposito
   server.tool(
     "stock_por_deposito",
-    "Consulta stock actual y reservado de un producto en un depósito específico o en todos.",
+    "Consulta stock actual y reservado de un producto en un depósito específico o en todos. Calcula disponible real y alerta sobreventas.",
     stockPorDeposito.schema,
     async (args) => {
       try {
@@ -139,10 +157,10 @@ export function registerContabiliumTools(server, client) {
     }
   );
 
-  // 8. cuentas_por_cobrar
+  // 8. cuentas_por_cobrar (MEJ-14: descripción armonizada)
   server.tool(
     "cuentas_por_cobrar",
-    "Lista comprobantes con saldo pendiente de cobro y totaliza la deuda agrupada por cliente.",
+    "Lista comprobantes pendientes de cobro y genera el reporte de antigüedad de deuda (Aging: 0-30, 31-60, 61-90, >90 días). Excluye cotizaciones.",
     cuentasPorCobrar.schema,
     async (args) => {
       try {
@@ -234,7 +252,7 @@ export function registerContabiliumTools(server, client) {
   // 13. registrar_consulta_no_soportada
   server.tool(
     "registrar_consulta_no_soportada",
-    "Registra internamente una consulta que el MCP no pudo responder por falta de datos o endpoint. Usar de forma transparente cuando el usuario pida algo fuera del alcance.",
+    "Registra internamente una consulta que el MCP no pudo responder y devuelve una alternativa constructiva para orientar al usuario.",
     registrarConsultaNoSoportada.schema,
     async (args) => {
       try {
@@ -331,4 +349,94 @@ export function registerContabiliumTools(server, client) {
       }
     }
   );
+
+  // ---------------------------------------------------------------------------
+  // Prompts oficiales del Servidor MCP (MEJ-11)
+  // ---------------------------------------------------------------------------
+  if (typeof server.prompt === "function") {
+    // 1. Resumen del mes
+    server.prompt(
+      "resumen_del_mes",
+      "Genera un resumen ejecutivo de ventas y operaciones del mes actual con desglose de facturado, notas de crédito y ticket promedio.",
+      {
+        mes: z.string().optional().describe("Mes a consultar en formato YYYY-MM (por defecto: mes en curso)."),
+      },
+      ({ mes }) => {
+        const m = mes || new Date().toISOString().slice(0, 7);
+        return {
+          messages: [
+            {
+              role: "user",
+              content: {
+                type: "text",
+                text: `Por favor generá un resumen ejecutivo de las ventas de ${m} usando resumen_ventas, indicando facturado bruto, notas de crédito, total neto, ticket promedio y principales clientes o grupos.`,
+              },
+            },
+          ],
+        };
+      }
+    );
+
+    // 2. Comparar con mes anterior
+    server.prompt(
+      "comparar_con_mes_anterior",
+      "Compara las ventas del mes en curso contra el mes anterior inmediato para evaluar crecimiento.",
+      {},
+      () => {
+        return {
+          messages: [
+            {
+              role: "user",
+              content: {
+                type: "text",
+                text: "Compará las ventas de este mes contra el mes pasado usando resumen_ventas con comparar_con_periodo_anterior=true. Explicá la variación porcentual de ventas y qué rubros crecieron o cayeron.",
+              },
+            },
+          ],
+        };
+      }
+    );
+
+    // 3. ¿Quién me debe?
+    server.prompt(
+      "quien_me_debe",
+      "Consulta clientes con deuda vencida y desglosa el reporte de antigüedad de saldos (Aging).",
+      {
+        solo_vencidas: z.boolean().default(true).describe("Si es true, solo analiza deuda vencida."),
+      },
+      ({ solo_vencidas }) => {
+        return {
+          messages: [
+            {
+              role: "user",
+              content: {
+                type: "text",
+                text: `Mostrame quiénes son los principales clientes que me deben usando cuentas_por_cobrar con solo_vencidas=${solo_vencidas}. Detallá los tramos de antigüedad de deuda (0-30, 31-60, 61-90 y más de 90 días) y qué clientes tienen mayor atraso.`,
+              },
+            },
+          ],
+        };
+      }
+    );
+
+    // 4. Productos sin stock
+    server.prompt(
+      "productos_sin_stock",
+      "Identifica productos sin existencias o en situación de sobreventa en los depósitos.",
+      {},
+      () => {
+        return {
+          messages: [
+            {
+              role: "user",
+              content: {
+                type: "text",
+                text: "Consultá los productos sin stock o con sobreventa usando stock_por_deposito con filtro='sin_stock', top=20 y orden='menor_disponible'. Alertá si detectás sobreventas por reservas comprometidas.",
+              },
+            },
+          ],
+        };
+      }
+    );
+  }
 }

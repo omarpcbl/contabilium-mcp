@@ -3,17 +3,17 @@
 **Entorno de referencia:** Producción (`rest.contabilium.com`, con validez fiscal AFIP) / QA  
 **Autor:** @Omar  
 **Fecha de Apertura:** 30 de septiembre de 2026  
-**Última actualización:** 30 de septiembre de 2026 (Post Re-Auditoría)  
+**Última actualización:** 30 de septiembre de 2026 (Sprint de Interactividad y Acompañamiento)  
 
 ---
 
 ## 📌 Estado General del Tablero
 
-| Categoría | Total | Finalizados (Fase 1 y 1.1) | Backlog (Fase 2 / 3) |
+| Categoría | Total | Finalizados | Backlog (Fase 2 / 3) |
 |---|---|---|---|
 | **Bugs (Defectos)** | 15 | 12 | 3 |
-| **Mejoras (Features)** | 9 | 4 | 5 |
-| **Total Items** | **24** | **16** | **8** |
+| **Mejoras (Features)** | 16 | 11 | 5 |
+| **Total Items** | **31** | **23** | **8** |
 
 ---
 
@@ -39,9 +39,9 @@
 
 ---
 
-## 🚀 Mejoras Propuestas (Features de Negocio)
+## 🚀 Mejoras Propuestas (Features y Experiencia de Usuario)
 
-| ID | Título | Pregunta de Negocio | Fase | Estado | Ticket Doc |
+| ID | Título | Pregunta / Necesidad de Negocio | Fase | Estado | Ticket Doc |
 |---|---|---|---|---|---|
 | **MEJ-01** | Separar en `resumen_ventas` facturado bruto, notas de crédito y neto | *¿Cuánto vendí y cuánto me devolvieron?* | Fase 1 | **FINALIZADO** | [MEJ-01.md](./MEJ-01.md) |
 | **MEJ-02** | Partir el rango en tramos dentro de `resumen_ventas` y `listar_ventas` | *¿Cómo vengo en el año?* | Fase 2 | **BACKLOG** | [MEJ-02.md](./MEJ-02.md) |
@@ -52,3 +52,10 @@
 | **MEJ-07** | Parámetro `top` y `orden` en `stock_por_deposito`, con total real en resumen | *¿Cuáles son los 20 productos más críticos?* | Fase 1 | **FINALIZADO** | [MEJ-07.md](./MEJ-07.md) |
 | **MEJ-08** | Stock valorizado por depósito (`stock × costo_interno`) | *¿Cuánta plata tengo inmovilizada en cada depósito?* | Fase 2 | **BACKLOG** | [MEJ-08.md](./MEJ-08.md) |
 | **MEJ-09** | Margen bruto por producto o rubro en `resumen_ventas` | *¿Qué productos me dejan más margen?* | Fase 3 | **BLOQUEADO API** | [MEJ-09.md](./MEJ-09.md) |
+| **MEJ-10** | Instrucciones de servidor en Handshake (dashboards, límites, alcances) | *¿Qué podés hacer?* sin alucinaciones de facturación | Fase 1.2 | **FINALIZADO** | [MEJ-10.md](./MEJ-10.md) |
+| **MEJ-11** | Exponer 4 Prompts oficiales de MCP (`resumen_del_mes`, `quien_me_debe`, etc.) | *No sé qué preguntar* (Menú interactivo con 1 clic) | Fase 1.2 | **FINALIZADO** | [MEJ-11.md](./MEJ-11.md) |
+| **MEJ-12** | Tool `que_puedo_consultar` con guía, límites y preguntas contextuales | Primer contacto guiado universal (onboarding y métricas) | Fase 1.2 | **FINALIZADO** | [MEJ-12.md](./MEJ-12.md) |
+| **MEJ-13** | `registrar_consulta_no_soportada` con alternativas funcionales proactivas | Evitar callejones sin salida en preguntas fuera de alcance | Fase 1.2 | **FINALIZADO** | [MEJ-13.md](./MEJ-13.md) |
+| **MEJ-14** | Corregir y armonizar descripciones de tools (soporte de agrupación por día) | Evitar alucinaciones y habilitar curva de ventas diaria | Fase 1.2 | **FINALIZADO** | [MEJ-14.md](./MEJ-14.md) |
+| **MEJ-15** | Etiquetas de período legibles (*«Semana 27 (29/6 al 5/7)»*, *«Julio 2026»*) | Respuestas comerciales legibles sin traducción de ISO | Fase 1.2 | **FINALIZADO** | [MEJ-15.md](./MEJ-15.md) |
+| **MEJ-16** | Visualización gráfica robusta (Barras tipográficas seguras sin fallos) | Visualizar proporciones y tendencias sin riesgo de rotura | Fase 1.2 | **FINALIZADO** | [MEJ-16.md](./MEJ-16.md) |

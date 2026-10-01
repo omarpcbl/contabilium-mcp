@@ -77,13 +77,11 @@ export function classifyFiscalInvoice(tipoRaw) {
   }
 
   // Notas de Crédito fiscales (restan)
-  // Ejemplos: NCA, NCB, NCC, NCE, NCM, NOTA DE CREDITO A, etc. (excluyendo NCT que ya fue descartado arriba)
   if (/^(NC[ABCEM]|NOTA DE CR[EÉ]DITO)\b/i.test(tipo) || (tipo.startsWith("NC") && !tipo.startsWith("NCT") && tipo.length <= 4)) {
     return { esFiscal: true, esVenta: false, esNC: true, tipoNormalizado: tipo };
   }
 
   // Facturas y Notas de Débito fiscales (suman)
-  // Ejemplos: FCA, FCB, FCC, FCE, FCM, NDA, NDB, NDC, NDE, NDM, FACTURA A, NOTA DE DEBITO B, etc.
   if (
     /^(FC[ABCEM]|ND[ABCEM]|FACTURA|NOTA DE D[EÉ]BITO)\b/i.test(tipo) ||
     (tipo.startsWith("FC") && tipo.length <= 4) ||
@@ -123,6 +121,24 @@ export function getYearMonth(dateStr) {
   return dateStr.slice(0, 7);
 }
 
+const NOMBRES_MESES = [
+  "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+  "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"
+];
+
+/**
+ * Convierte 'YYYY-MM' en una etiqueta legible como 'Julio 2026' (MEJ-15)
+ */
+export function formatYearMonthLabel(dateStr) {
+  if (!dateStr || dateStr.length < 7) return dateStr || "Sin fecha";
+  const year = dateStr.slice(0, 4);
+  const monthIdx = parseInt(dateStr.slice(5, 7), 10) - 1;
+  if (monthIdx >= 0 && monthIdx < 12) {
+    return `${NOMBRES_MESES[monthIdx]} ${year}`;
+  }
+  return dateStr;
+}
+
 /**
  * Obtiene semana del año (YYYY-Www)
  */
@@ -133,6 +149,43 @@ export function getIsoWeek(dateStr) {
   const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
   const weekNo = Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
   return `${d.getUTCFullYear()}-W${String(weekNo).padStart(2, "0")}`;
+}
+
+/**
+ * Convierte 'YYYY-Www' en una etiqueta legible como 'Semana 27 (29/06 al 05/07/2026)' (MEJ-15)
+ */
+export function formatIsoWeekLabel(isoWeekStr) {
+  if (!isoWeekStr || !isoWeekStr.includes("-W")) return isoWeekStr || "Sin fecha";
+  const parts = isoWeekStr.split("-W");
+  const year = parseInt(parts[0], 10);
+  const week = parseInt(parts[1], 10);
+  if (isNaN(year) || isNaN(week)) return isoWeekStr;
+
+  const simple = new Date(Date.UTC(year, 0, 4));
+  const dayOfWeek = simple.getUTCDay() || 7;
+  const mondayWeek1 = new Date(simple.getTime() - (dayOfWeek - 1) * 86400000);
+  const startMonday = new Date(mondayWeek1.getTime() + (week - 1) * 7 * 86400000);
+  const endSunday = new Date(startMonday.getTime() + 6 * 86400000);
+
+  const fStart = `${String(startMonday.getUTCDate()).padStart(2, "0")}/${String(startMonday.getUTCMonth() + 1).padStart(2, "0")}`;
+  const fEnd = `${String(endSunday.getUTCDate()).padStart(2, "0")}/${String(endSunday.getUTCMonth() + 1).padStart(2, "0")}/${endSunday.getUTCFullYear()}`;
+
+  return `Semana ${week} (${fStart} al ${fEnd})`;
+}
+
+/**
+ * Genera una barra visual tipográfica segura para dashboards (MEJ-16)
+ * Ej: '████████░░ 80%'
+ */
+export function renderProgressBar(value, max, length = 10) {
+  const v = parseAmount(value);
+  const m = parseAmount(max);
+  if (m <= 0 || v <= 0) return `${"░".repeat(length)} 0%`;
+  const ratio = Math.min(1, Math.max(0, v / m));
+  const filledCount = Math.round(ratio * length);
+  const emptyCount = length - filledCount;
+  const pct = Math.round(ratio * 100);
+  return `${"█".repeat(filledCount)}${"░".repeat(emptyCount)} ${pct}%`;
 }
 
 /**
