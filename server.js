@@ -45,6 +45,15 @@ function normalizePath(p, defaultVal) {
 const QA_PATH = normalizePath(process.env.MCP_QA_PATH || process.env.MCP_PARALLEL_PATH, "/qa");
 
 /**
+ * Helper para leer cookies en requests de Express sin dependencias externas
+ */
+function getCookie(req, name) {
+  const cookieHeader = req?.headers?.cookie || "";
+  const match = cookieHeader.match(new RegExp("(?:^|;\\s*)" + name + "=([^;]+)"));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+/**
  * Valida acceso al endpoint paralelo/QA si se configuró MCP_QA_SECRET
  */
 function validateQaAccess(req) {
@@ -58,6 +67,25 @@ function validateQaAccess(req) {
                          (req.headers?.authorization && req.headers.authorization.startsWith("Bearer ") ? req.headers.authorization.slice(7).trim() : null);
 
   return providedSecret === qaSecret;
+}
+
+/**
+ * Valida acceso al Portal Web si se configuró clave de acceso restringido
+ * Por defecto para el equipo: "contabilium2026" (o variable PORTAL_ACCESS_SECRET)
+ * Para desactivar la máscara: PORTAL_ACCESS_SECRET=disabled o false
+ */
+function validatePortalAccess(req) {
+  const portalSecret = process.env.PORTAL_ACCESS_SECRET || process.env.PORTAL_ACCESS_KEY || "contabilium2026";
+  if (portalSecret === "disabled" || portalSecret === "false") return true;
+
+  const providedSecret = req?.query?.key || 
+                         req?.query?.access || 
+                         req?.query?.secret || 
+                         getCookie(req, "cbl_portal_access") ||
+                         req?.headers?.["x-portal-key"] || 
+                         req?.headers?.["x-access-key"];
+
+  return providedSecret === portalSecret;
 }
 
 // -------------------------------------------------------------
@@ -189,6 +217,26 @@ function createMcpServerForSession(credentials, isParallel = false) {
 }
 
 // -------------------------------------------------------------
+// Endpoint API: Verificación de acceso al Portal Privado
+// -------------------------------------------------------------
+app.post("/api/verify-portal-access", (req, res) => {
+  const { key } = req.body || {};
+  const portalSecret = process.env.PORTAL_ACCESS_SECRET || process.env.PORTAL_ACCESS_KEY || "contabilium2026";
+
+  if (portalSecret === "disabled" || portalSecret === "false" || key === portalSecret) {
+    res.cookie("cbl_portal_access", portalSecret, {
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+      httpOnly: false,
+      sameSite: "lax",
+      path: "/"
+    });
+    return res.json({ ok: true });
+  }
+
+  return res.status(401).json({ ok: false, error: "Clave de acceso incorrecta. Verifica con el equipo." });
+});
+
+// -------------------------------------------------------------
 // Endpoint API: Generador y Validador de Token Cifrado
 // -------------------------------------------------------------
 app.post("/api/generate-token", async (req, res) => {
@@ -197,6 +245,10 @@ app.post("/api/generate-token", async (req, res) => {
 
   if (isParallel && !validateQaAccess({ query: { key }, headers: req.headers })) {
     return res.status(401).json({ ok: false, error: "No autorizado: Secreto de acceso a QA inválido." });
+  }
+
+  if (!isParallel && !validatePortalAccess(req) && !validatePortalAccess({ query: { key }, headers: req.headers })) {
+    return res.status(401).json({ ok: false, error: "No autorizado: Acceso restringido al portal." });
   }
 
   if (!clientId || !clientSecret) {
@@ -294,7 +346,26 @@ app.get("/api/discovery-logs", (req, res) => {
 // Portal Web UI (Material Design 3 + UI/UX Pro Max)
 // -------------------------------------------------------------
 app.get("/", (req, res) => {
-  res.send(`
+  const isAuthorized = validatePortalAccess(req);
+  const portalSecret = process.env.PORTAL_ACCESS_SECRET || process.env.PORTAL_ACCESS_KEY || "contabilium2026";
+
+  if (isAuthorized) {
+    if (req.query?.key === portalSecret || req.query?.access === portalSecret || req.query?.secret === portalSecret) {
+      res.cookie("cbl_portal_access", portalSecret, {
+        maxAge: 30 * 24 * 60 * 60 * 1000,
+        httpOnly: false,
+        sameSite: "lax",
+        path: "/"
+      });
+    }
+    return res.send(renderMainPortalHtml());
+  }
+
+  return res.send(renderAccessGateHtml());
+});
+
+function renderMainPortalHtml() {
+  return `
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -1428,11 +1499,16 @@ app.get("/", (req, res) => {
         <p class="subtitle">Accede a tu facturación y stock desde tu asistente de IA.</p>
       </div>
 
-      <!-- Trigger para abrir la Guía de Conexión -->
-      <button type="button" class="btn-help-trigger" id="openHelpBtn" aria-haspopup="dialog" aria-controls="helpModal" title="¿Cómo conectar este servidor MCP?">
-        <span class="material-symbols-outlined">help</span>
-        <span class="help-btn-text">¿Cómo conectar?</span>
-      </button>
+      <!-- Acciones de Cabecera: Guía de Ayuda y Bloqueo -->
+      <div style="display:flex; align-items:center; gap:8px;">
+        <button type="button" class="btn-help-trigger" id="openHelpBtn" aria-haspopup="dialog" aria-controls="helpModal" title="¿Cómo conectar este servidor MCP?">
+          <span class="material-symbols-outlined">help</span>
+          <span class="help-btn-text">¿Cómo conectar?</span>
+        </button>
+        <button type="button" class="btn-help-trigger" onclick="lockPortalSession()" title="Bloquear portal y cerrar sesión" aria-label="Bloquear interfaz" style="padding:8px 10px; min-width:38px; justify-content:center;">
+          <span class="material-symbols-outlined" style="font-size:17px;">lock</span>
+        </button>
+      </div>
     </header>
 
     <!-- Formulario M3 Accesible -->
@@ -1922,11 +1998,373 @@ app.get("/", (req, res) => {
       if (!str) return "";
       return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
     }
+
+    // Limpieza de parámetros en la barra de direcciones para no filtrar la clave si se copia la URL
+    if (window.location.search.includes('key=') || window.location.search.includes('access=') || window.location.search.includes('secret=')) {
+      const cleanUrl = new URL(window.location);
+      cleanUrl.searchParams.delete('key');
+      cleanUrl.searchParams.delete('access');
+      cleanUrl.searchParams.delete('secret');
+      window.history.replaceState({}, document.title, cleanUrl.pathname + (cleanUrl.search ? cleanUrl.search : ''));
+    }
+
+    // Bloquear portal y borrar cookie de sesión
+    function lockPortalSession() {
+      document.cookie = 'cbl_portal_access=; path=/; max-age=0; SameSite=Lax';
+      window.location.href = '/';
+    }
   </script>
 </body>
 </html>
-  `);
-});
+  `;
+}
+
+/**
+ * Máscara de Acceso Restringido (Gate Screen)
+ * Protege el portal con Work Sans, colores Contabilium y diseño minimalista.
+ */
+function renderAccessGateHtml() {
+  return `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Acceso Restringido - Contabilium MCP</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Work+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
+  <style>
+    :root {
+      --cbl-brand: #00C7AF;
+      --cbl-brand-hover: #00E2C8;
+      --cbl-brand-active: #00A994;
+      --cbl-brand-tint: rgba(0, 199, 175, 0.12);
+      --cbl-brand-glow: rgba(0, 199, 175, 0.25);
+      --cbl-danger-text: #FF648A;
+      --cbl-danger-bg: rgba(243, 36, 101, 0.14);
+      --cbl-danger-accent: #F32465;
+      --m3-surface: #0E1015;
+      --m3-surface-container: #141720;
+      --m3-surface-container-high: #1A1E29;
+      --m3-outline: #2C3344;
+      --m3-outline-variant: #1E2330;
+      --m3-on-surface: #F3F4F6;
+      --m3-on-surface-variant: #9CA3AF;
+      --m3-motion-standard: cubic-bezier(0.2, 0, 0, 1);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Work Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background-color: #07080B;
+      color: var(--m3-on-surface);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      padding: 24px 16px;
+      line-height: 1.5;
+      position: relative;
+      overflow-x: hidden;
+    }
+    body::before {
+      content: "";
+      position: absolute;
+      top: -160px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 680px;
+      height: 480px;
+      background: radial-gradient(circle, rgba(0, 199, 175, 0.12) 0%, rgba(7, 8, 11, 0) 70%);
+      pointer-events: none;
+      z-index: 0;
+    }
+    :focus-visible {
+      outline: 2px solid var(--cbl-brand);
+      outline-offset: 2px;
+    }
+    .gate-card {
+      position: relative;
+      z-index: 1;
+      background-color: var(--m3-surface);
+      border: 1px solid var(--m3-outline-variant);
+      border-radius: 24px;
+      padding: 36px 32px;
+      max-width: 440px;
+      width: 100%;
+      box-shadow: 0 20px 50px -10px rgba(0, 0, 0, 0.9), 0 0 1px 1px rgba(255, 255, 255, 0.05);
+      animation: gateFadeIn 0.3s var(--m3-motion-standard);
+    }
+    @keyframes gateFadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .gate-header {
+      text-align: center;
+      margin-bottom: 24px;
+    }
+    .gate-icon-box {
+      width: 52px;
+      height: 52px;
+      margin: 0 auto 16px;
+      border-radius: 16px;
+      background: var(--cbl-brand-tint);
+      color: var(--cbl-brand);
+      border: 1px solid rgba(0, 199, 175, 0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 24px rgba(0, 199, 175, 0.2);
+    }
+    .gate-icon-box .material-symbols-outlined {
+      font-size: 28px;
+    }
+    .gate-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--cbl-brand-tint);
+      color: var(--cbl-brand);
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 12px;
+      border-radius: 9999px;
+      border: 1px solid rgba(0, 199, 175, 0.25);
+      margin-bottom: 12px;
+    }
+    .gate-badge-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--cbl-brand);
+    }
+    h1 {
+      font-size: 21px;
+      font-weight: 600;
+      color: #ffffff;
+      letter-spacing: -0.2px;
+      margin-bottom: 8px;
+    }
+    p.gate-subtitle {
+      font-size: 13.5px;
+      color: var(--m3-on-surface-variant);
+      line-height: 1.5;
+    }
+    .gate-form {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .gate-input-wrap {
+      position: relative;
+      display: flex;
+      align-items: center;
+      background: var(--m3-surface-container);
+      border: 1px solid var(--m3-outline);
+      border-radius: 12px;
+      min-height: 48px;
+      transition: all 0.2s;
+    }
+    .gate-input-wrap:focus-within {
+      border-color: var(--cbl-brand);
+      box-shadow: 0 0 0 3px var(--cbl-brand-glow);
+      background: var(--m3-surface-container-high);
+    }
+    .gate-input-wrap input {
+      width: 100%;
+      background: transparent;
+      border: none;
+      padding: 13px 16px;
+      font-size: 14.5px;
+      font-family: inherit;
+      color: var(--m3-on-surface);
+      outline: none;
+    }
+    .gate-input-wrap input::placeholder {
+      color: #5E6678;
+      font-size: 13.5px;
+    }
+    .toggle-pw-btn {
+      background: none;
+      border: none;
+      color: var(--m3-on-surface-variant);
+      cursor: pointer;
+      min-width: 44px;
+      min-height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 8px;
+      margin-right: 4px;
+      transition: color 0.15s;
+    }
+    .toggle-pw-btn:hover {
+      color: #fff;
+    }
+    .btn-gate-submit {
+      width: 100%;
+      min-height: 48px;
+      padding: 13px 20px;
+      background: var(--cbl-brand);
+      color: #07090D;
+      border: none;
+      border-radius: 12px;
+      font-family: inherit;
+      font-weight: 700;
+      font-size: 14.5px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      box-shadow: 0 4px 18px rgba(0, 199, 175, 0.35);
+      transition: all 0.2s var(--m3-motion-standard);
+    }
+    .btn-gate-submit:hover:not(:disabled) {
+      background: var(--cbl-brand-hover);
+      box-shadow: 0 6px 24px rgba(0, 199, 175, 0.45);
+      transform: translateY(-1px);
+    }
+    .btn-gate-submit:disabled {
+      background: #1F2430;
+      color: #555E70;
+      cursor: not-allowed;
+      box-shadow: none;
+      transform: none;
+    }
+    .gate-error {
+      display: none;
+      background: var(--cbl-danger-bg);
+      border: 1px solid var(--cbl-danger-accent);
+      border-radius: 10px;
+      padding: 10px 14px;
+      color: var(--cbl-danger-text);
+      font-size: 12.5px;
+      font-weight: 500;
+      text-align: center;
+      animation: gateShake 0.35s ease-in-out;
+    }
+    @keyframes gateShake {
+      0%, 100% { transform: translateX(0); }
+      20%, 60% { transform: translateX(-6px); }
+      40%, 80% { transform: translateX(6px); }
+    }
+    .gate-instructions {
+      margin-top: 22px;
+      padding-top: 18px;
+      border-top: 1px solid var(--m3-outline-variant);
+      font-size: 12px;
+      color: var(--m3-on-surface-variant);
+      line-height: 1.5;
+      text-align: center;
+    }
+    .gate-instructions strong {
+      color: #fff;
+    }
+    .gate-instructions code {
+      background: #050608;
+      border: 1px solid var(--m3-outline);
+      color: var(--cbl-brand);
+      padding: 2px 6px;
+      border-radius: 5px;
+      font-family: ui-monospace, monospace;
+      font-size: 11px;
+    }
+  </style>
+</head>
+<body>
+  <main class="gate-card">
+    <div class="gate-header">
+      <div class="gate-icon-box" aria-hidden="true">
+        <span class="material-symbols-outlined">lock</span>
+      </div>
+      <div class="gate-badge">
+        <span class="gate-badge-dot"></span>
+        <span>Acceso Privado</span>
+      </div>
+      <h1>Acceso Restringido</h1>
+      <p class="gate-subtitle">Este portal se encuentra en fase de validación interna. Ingresa la clave de acceso autorizada para ingresar.</p>
+    </div>
+
+    <form class="gate-form" id="gateForm" novalidate>
+      <div>
+        <label for="gateKey" style="display:block; font-size:12.5px; font-weight:500; margin-bottom:6px;">Clave de acceso</label>
+        <div class="gate-input-wrap">
+          <input type="password" id="gateKey" placeholder="Ingresa la clave del equipo" required autocomplete="current-password" autofocus>
+          <button type="button" class="toggle-pw-btn" id="toggleGatePw" aria-label="Mostrar clave">
+            <span class="material-symbols-outlined" id="toggleGateIcon" style="font-size:20px;">visibility</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="gate-error" id="gateErrorBox" role="alert"></div>
+
+      <button type="submit" class="btn-gate-submit" id="gateSubmitBtn">
+        <span class="material-symbols-outlined" style="font-size:18px;">lock_open</span>
+        <span>Desbloquear interfaz</span>
+      </button>
+    </form>
+
+    <div class="gate-instructions">
+      <strong>Instrucciones para el equipo:</strong>
+      <p style="margin-top:4px;">
+        Puedes ingresar directamente agregando <code>?key=tu_clave</code> a la URL. Si necesitas la clave, solicítala al equipo de producto o revisa <code>PORTAL_ACCESS_SECRET</code>.
+      </p>
+    </div>
+  </main>
+
+  <script>
+    const gatePw = document.getElementById('gateKey');
+    const toggleGatePw = document.getElementById('toggleGatePw');
+    const toggleGateIcon = document.getElementById('toggleGateIcon');
+    const gateForm = document.getElementById('gateForm');
+    const gateSubmitBtn = document.getElementById('gateSubmitBtn');
+    const gateErrorBox = document.getElementById('gateErrorBox');
+
+    if (toggleGatePw && gatePw) {
+      toggleGatePw.addEventListener('click', () => {
+        const isPw = gatePw.type === 'password';
+        gatePw.type = isPw ? 'text' : 'password';
+        toggleGateIcon.innerText = isPw ? 'visibility_off' : 'visibility';
+      });
+    }
+
+    gateForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const key = gatePw.value.trim();
+      if (!key) return;
+
+      gateErrorBox.style.display = 'none';
+      gateSubmitBtn.disabled = true;
+      gateSubmitBtn.innerHTML = '<span class="material-symbols-outlined" style="animation:spin 1s infinite linear; font-size:18px;">sync</span><span>Validando clave...</span>';
+
+      try {
+        const res = await fetch('/api/verify-portal-access', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          window.location.reload();
+        } else {
+          gateErrorBox.innerText = data.error || 'Clave de acceso incorrecta.';
+          gateErrorBox.style.display = 'block';
+          gatePw.select();
+        }
+      } catch (err) {
+        gateErrorBox.innerText = 'Error de conexión: ' + err.message;
+        gateErrorBox.style.display = 'block';
+      } finally {
+        gateSubmitBtn.disabled = false;
+        gateSubmitBtn.innerHTML = '<span class="material-symbols-outlined" style="font-size:18px;">lock_open</span><span>Desbloquear interfaz</span>';
+      }
+    });
+  </script>
+</body>
+</html>`;
+}
 
 // -------------------------------------------------------------
 // 1. TRANSPORTE MODERNO: Streamable HTTP (/mcp)
