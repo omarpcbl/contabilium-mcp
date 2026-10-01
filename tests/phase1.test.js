@@ -10,6 +10,7 @@ import * as diagnosticarOrden from "../src/tools/diagnosticar_orden.js";
 import { registerContabiliumTools } from "../src/register-tools.js";
 import { classifyFiscalInvoice, formatIsoWeekLabel, formatYearMonthLabel, getTodayString, renderProgressBar, validateTaxId } from "../src/utils.js";
 import { SYSTEM_INSTRUCTION } from "../src/instructions.js";
+import { ContabiliumClient } from "../src/contabilium-client.js";
 
 describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
 
@@ -984,6 +985,127 @@ describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
       assert.equal(parsed.datos.modulos.length, 1);
       assert.equal(parsed.datos.modulos[0].nombre, "Diagnóstico de Órdenes e Integraciones E-Commerce (OP-08)");
       assert.ok(parsed.datos.modulos[0].tools.includes("diagnosticar_orden"));
+    });
+  });
+
+  describe("Paginación por Tramos y Blindaje contra Cotizaciones en Alto Volumen (MEJ-17)", () => {
+    it("chunkedDateGet particiona rangos > 7 días en tramos de 7 días y concatena registros", async () => {
+      const client = new ContabiliumClient();
+      const llamadas = [];
+
+      // Interceptar paginatedGet para verificar los tramos generados
+      client.paginatedGet = async (endpoint, params, maxPages) => {
+        llamadas.push({ endpoint, fechaDesde: params.fechaDesde, fechaHasta: params.fechaHasta, maxPages });
+        return {
+          items: [
+            { Id: llamadas.length, FechaEmision: `${params.fechaDesde}T10:00:00`, TipoFc: "FCA", Total: 1000 },
+          ],
+          truncado: false,
+          paginasLeidas: 1,
+          totalRegistros: 1,
+        };
+      };
+
+      const res = await client.chunkedDateGet("/comprobantes/search", {}, "2026-09-01", "2026-09-30", {
+        chunkDays: 7,
+        maxPagesPerChunk: 15,
+        maxTotalPages: 50,
+      });
+
+      // 30 días con chunks de 7 días genera 5 tramos:
+      // 1: 01 al 07 (7 días)
+      // 2: 08 al 14 (7 días)
+      // 3: 15 al 21 (7 días)
+      // 4: 22 al 28 (7 días)
+      // 5: 29 al 30 (2 días)
+      assert.equal(llamadas.length, 5);
+      assert.equal(llamadas[0].fechaDesde, "2026-09-01");
+      assert.equal(llamadas[0].fechaHasta, "2026-09-07");
+      assert.equal(llamadas[1].fechaDesde, "2026-09-08");
+      assert.equal(llamadas[1].fechaHasta, "2026-09-14");
+      assert.equal(llamadas[4].fechaDesde, "2026-09-29");
+      assert.equal(llamadas[4].fechaHasta, "2026-09-30");
+
+      assert.equal(res.items.length, 5);
+      assert.equal(res.truncado, false);
+      assert.equal(res.paginasLeidas, 5);
+    });
+
+    it("resumen_ventas procesa 30 días sin truncamiento usando chunkedDateGet", async () => {
+      // Simula el escenario crítico de automation_restv1_ar_RI:
+      // Cuenta con 75% cotizaciones que con paginación tradicional truncaba en el día 16
+      const mockClient = {
+        chunkedDateGet: async (endpoint, params, desde, hasta) => {
+          // Devuelve comprobantes de los días 01 al 30 sin truncar
+          const items = [
+            { Id: 1, TipoFc: "COT", Total: 500, FechaEmision: "2026-09-05", RazonSocial: "Cliente 1" },
+            { Id: 2, TipoFc: "FCA", Total: 10000, FechaEmision: "2026-09-05", RazonSocial: "Cliente 1" },
+            { Id: 3, TipoFc: "COT", Total: 500, FechaEmision: "2026-09-20", RazonSocial: "Cliente 2" },
+            { Id: 4, TipoFc: "FCB", Total: 15000, FechaEmision: "2026-09-20", RazonSocial: "Cliente 2" },
+            { Id: 5, TipoFc: "FCA", Total: 20000, FechaEmision: "2026-09-29", RazonSocial: "Cliente 3" },
+          ];
+          return { items, truncado: false, paginasLeidas: 5, totalRegistros: 5 };
+        },
+      };
+
+      const result = await resumenVentas.handler(
+        { fecha_desde: "2026-09-01", fecha_hasta: "2026-09-30", agrupar_por: "mes" },
+        mockClient
+      );
+
+      const parsed = JSON.parse(result.content[0].text);
+      assert.equal(parsed.truncado, false);
+      assert.equal(parsed.datos.totales_generales.cotizaciones_excluidas, 2);
+      assert.equal(parsed.datos.totales_generales.cantidad_facturas, 3);
+      assert.equal(parsed.datos.totales_generales.total_neto, 45000);
+      assert.match(parsed.resumen, /Ventas netas del período: \$ 45\.000,00/);
+    });
+  });
+
+  describe("Resolución de Nombres Comerciales de Productos (BUG-04)", () => {
+    it("stock_por_deposito resuelve nombres comerciales desde /conceptos/search cuando el inventario solo devuelve SKU", async () => {
+      const mockClient = {
+        get: async (endpoint, params) => {
+          if (endpoint === "/inventarios/getDepositos") {
+            return [{ Id: 1, Nombre: "CENTRAL", Activo: true }];
+          }
+          if (endpoint === "/conceptos/search") {
+            if (params?.filtro === "CB-1767810439004-742581") {
+              return {
+                Items: [
+                  { Codigo: "CB-1767810439004-742581", Nombre: "COMBO QA", Concepto: "COMBO QA" },
+                ],
+              };
+            }
+          }
+          return null;
+        },
+        paginatedGet: async (endpoint) => {
+          if (endpoint === "/inventarios/getStockByDeposito") {
+            return {
+              items: [
+                { Codigo: "CB-1767810439004-742581", StockActual: 15, StockReservado: 0 },
+              ],
+              truncado: false,
+              paginasLeidas: 1,
+              totalRegistros: 1,
+            };
+          }
+          return { items: [], truncado: false, paginasLeidas: 0, totalRegistros: 0 };
+        },
+      };
+
+      const result = await stockPorDeposito.handler(
+        { deposito_id: 1, top: 10 },
+        mockClient
+      );
+
+      const parsed = JSON.parse(result.content[0].text);
+      assert.equal(parsed.datos.length, 1);
+      assert.equal(parsed.datos[0].codigo, "CB-1767810439004-742581");
+      // Resuelto exitosamente a su nombre comercial en lugar de quedar como el código SKU en bruto
+      assert.equal(parsed.datos[0].producto, "COMBO QA");
+      assert.equal(parsed.datos[0].disponible, 15);
     });
   });
 

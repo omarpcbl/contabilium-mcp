@@ -10,7 +10,8 @@
   "scripts": {
     "start": "node server.js",
     "stdio": "node index.js",
-    "test": "node --test tests/*.test.js"
+    "test": "node --test tests/*.test.js",
+    "patch:postman": "node scripts/patch-dev-postman.js"
   },
   "keywords": [
     "contabilium",

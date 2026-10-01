@@ -10,6 +10,8 @@
  * - Mapeo de errores sin exponer HTML de Cloudflare ni credenciales.
  */
 
+import { addDays, diffDays } from "./utils.js";
+
 const COUNTRY_URLS = {
   AR: "https://rest.contabilium.com",
   CL: "https://rest.contabilium.cl",
@@ -303,6 +305,82 @@ export class ContabiliumClient {
       items: allItems,
       truncado: isTruncated,
       paginasLeidas: page - 1,
+      totalRegistros: allItems.length,
+    };
+  }
+
+  /**
+   * Paginador particionado por ventanas temporales (MEJ-17).
+   * Evita que cuentas de alto volumen o con alta proporción de cotizaciones (que la API no filtra)
+   * agoten el tope de páginas antes de cubrir el período completo.
+   *
+   * @param {string} endpoint - Endpoint de la API (ej. "/comprobantes/search")
+   * @param {Object} baseParams - Parámetros base (ej. { idCliente: 123 })
+   * @param {string} fechaDesde - Fecha inicial YYYY-MM-DD
+   * @param {string} fechaHasta - Fecha final YYYY-MM-DD
+   * @param {Object} options - { chunkDays: 7, maxPagesPerChunk: 15, maxTotalPages: 50, ttlSeconds: 300 }
+   */
+  async chunkedDateGet(endpoint, baseParams = {}, fechaDesde, fechaHasta, options = {}) {
+    const {
+      chunkDays = 7,
+      maxPagesPerChunk = 15,
+      maxTotalPages = 50,
+      ttlSeconds = 300,
+    } = options;
+
+    const totalDays = diffDays(fechaDesde, fechaHasta);
+
+    // Si el rango es menor o igual a chunkDays, usar paginatedGet directo
+    if (totalDays <= chunkDays) {
+      return this.paginatedGet(
+        endpoint,
+        { ...baseParams, fechaDesde, fechaHasta },
+        Math.min(maxPagesPerChunk, maxTotalPages),
+        ttlSeconds
+      );
+    }
+
+    const allItems = [];
+    let isTruncated = false;
+    let totalPaginasLeidas = 0;
+    let currentDesde = fechaDesde;
+
+    while (currentDesde <= fechaHasta) {
+      if (totalPaginasLeidas >= maxTotalPages) {
+        isTruncated = true;
+        break;
+      }
+
+      // Calcular fecha fin del tramo actual (chunkDays días de longitud)
+      let currentHasta = addDays(currentDesde, chunkDays - 1);
+      if (currentHasta > fechaHasta) {
+        currentHasta = fechaHasta;
+      }
+
+      const pagesBudget = Math.min(maxPagesPerChunk, maxTotalPages - totalPaginasLeidas);
+
+      const chunkRes = await this.paginatedGet(
+        endpoint,
+        { ...baseParams, fechaDesde: currentDesde, fechaHasta: currentHasta },
+        pagesBudget,
+        ttlSeconds
+      );
+
+      allItems.push(...chunkRes.items);
+      totalPaginasLeidas += chunkRes.paginasLeidas;
+
+      if (chunkRes.truncado) {
+        isTruncated = true;
+      }
+
+      // Avanzar al siguiente tramo
+      currentDesde = addDays(currentHasta, 1);
+    }
+
+    return {
+      items: allItems,
+      truncado: isTruncated,
+      paginasLeidas: totalPaginasLeidas,
       totalRegistros: allItems.length,
     };
   }

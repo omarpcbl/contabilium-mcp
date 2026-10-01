@@ -1,6 +1,59 @@
 import { z } from "zod";
 import { formatToolResponse, parseAmount } from "../utils.js";
 
+// Caché en memoria para nombres comerciales de productos (SKU -> Nombre) (BUG-04)
+const skuNameCache = new Map();
+
+async function resolveProductNames(items, client) {
+  if (!items || items.length === 0) return;
+
+  const sinNombre = items.filter(
+    (it) => it.codigo && (!it.producto || it.producto === it.codigo)
+  );
+
+  if (sinNombre.length === 0) return;
+
+  // Límite de seguridad para no exceder presupuesto de peticiones
+  const lote = sinNombre.slice(0, 25);
+
+  for (const item of lote) {
+    const sku = String(item.codigo).trim();
+    if (!sku) continue;
+
+    if (skuNameCache.has(sku)) {
+      item.producto = skuNameCache.get(sku);
+      continue;
+    }
+
+    try {
+      const res = await client.get("/conceptos/search", { filtro: sku, pageSize: 5 }, 1800);
+      let itemsConceptos = [];
+      if (Array.isArray(res)) {
+        itemsConceptos = res;
+      } else if (res && Array.isArray(res.Items)) {
+        itemsConceptos = res.Items;
+      } else if (res && Array.isArray(res.items)) {
+        itemsConceptos = res.items;
+      }
+
+      const match =
+        itemsConceptos.find(
+          (c) => String(c.Codigo || c.codigo || "").trim().toLowerCase() === sku.toLowerCase()
+        ) || itemsConceptos[0];
+
+      if (match) {
+        const nombre = match.Nombre || match.nombre || match.Concepto || sku;
+        skuNameCache.set(sku, nombre);
+        item.producto = nombre;
+      } else {
+        skuNameCache.set(sku, sku);
+      }
+    } catch {
+      skuNameCache.set(sku, sku);
+    }
+  }
+}
+
 export const schema = {
   deposito_id: z.number().int().optional().describe("ID del depósito específico a consultar (opcional; si se omite, consulta todos)."),
   codigo_producto: z.string().optional().describe("Código SKU específico para filtrar (opcional)."),
@@ -10,7 +63,7 @@ export const schema = {
   orden: z.enum(["menor_disponible", "mayor_disponible", "alfabetico"]).default("menor_disponible").describe("Criterio de ordenamiento de los productos."),
 };
 
-export async function handler({ deposito_id, codigo_producto, filtro, umbral, top = 20, orden = "menor_disponible" }, client) {
+export async function handler({ deposito_id, codigo_producto, filtro = "todos", umbral, top = 20, orden = "menor_disponible" }, client) {
   if (filtro === "bajo_umbral" && (umbral === undefined || umbral === null)) {
     throw new Error("El parámetro 'umbral' es obligatorio cuando el filtro es 'bajo_umbral'.");
   }
@@ -121,6 +174,7 @@ export async function handler({ deposito_id, codigo_producto, filtro, umbral, to
 
   const totalEncontrados = todasLasFilas.length;
   const datos = todasLasFilas.slice(0, top);
+  await resolveProductNames(datos, client);
   const esTruncadoPorTop = totalEncontrados > top;
   const truncado = truncadoApi || esTruncadoPorTop;
 

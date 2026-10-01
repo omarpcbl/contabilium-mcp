@@ -30,11 +30,18 @@ export async function handler({ fecha_desde, fecha_hasta, agrupar_por, top, comp
     throw new Error(`El rango solicitado es de ${dias} días (supera el límite de 92 días). Por favor acota las fechas o pártelas en tramos.`);
   }
 
-  // Presupuesto de páginas: 20 páginas en total
-  let maxPagesActual = comparar_con_periodo_anterior ? 12 : 20;
+  // Presupuesto de páginas y consulta particionada por tramos (MEJ-17)
+  const maxPagesActual = comparar_con_periodo_anterior ? 30 : 50;
 
   // 1. Obtener comprobantes del período actual
-  const actualRes = await client.paginatedGet("/comprobantes/search", { fechaDesde: fecha_desde, fechaHasta: fecha_hasta }, maxPagesActual, 300);
+  const actualRes = client.chunkedDateGet
+    ? await client.chunkedDateGet("/comprobantes/search", {}, fecha_desde, fecha_hasta, {
+        chunkDays: 7,
+        maxPagesPerChunk: 15,
+        maxTotalPages: maxPagesActual,
+        ttlSeconds: 300,
+      })
+    : await client.paginatedGet("/comprobantes/search", { fechaDesde: fecha_desde, fechaHasta: fecha_hasta }, maxPagesActual, 300);
   let totalPaginasUsadas = actualRes.paginasLeidas;
 
   // 2. Si agrupa por rubro, traer mapa de rubros con caché
@@ -242,8 +249,15 @@ export async function handler({ fecha_desde, fecha_hasta, agrupar_por, top, comp
     const prevHasta = subDays(fecha_desde, 1);
     const prevDesde = subDays(prevHasta, dias);
 
-    const maxPagesAnterior = Math.max(1, 20 - totalPaginasUsadas);
-    const anteriorRes = await client.paginatedGet("/comprobantes/search", { fechaDesde: prevDesde, fechaHasta: prevHasta }, maxPagesAnterior, 300);
+    const maxPagesAnterior = Math.max(15, 60 - totalPaginasUsadas);
+    const anteriorRes = client.chunkedDateGet
+      ? await client.chunkedDateGet("/comprobantes/search", {}, prevDesde, prevHasta, {
+          chunkDays: 7,
+          maxPagesPerChunk: 15,
+          maxTotalPages: maxPagesAnterior,
+          ttlSeconds: 300,
+        })
+      : await client.paginatedGet("/comprobantes/search", { fechaDesde: prevDesde, fechaHasta: prevHasta }, maxPagesAnterior, 300);
 
     if (anteriorRes.truncado) truncadoTotal = true;
     anteriorData = procesarComprobantes(anteriorRes.items);
@@ -296,13 +310,13 @@ export async function handler({ fecha_desde, fecha_hasta, agrupar_por, top, comp
   }
   if (truncadoTotal) {
     advertencias.push(
-      `Consulta limitada por tope de 20 páginas de la API (última fecha alcanzada: ${actualData.ultimaFechaLeida || "desconocida"}). Se sugiere acotar el rango de fechas para mayor precisión.`
+      `Consulta limitada por tope de páginas de la API (última fecha alcanzada: ${actualData.ultimaFechaLeida || "desconocida"}). Se sugiere acotar el rango de fechas para mayor precisión.`
     );
   }
 
   let encabezadoResumen = "";
   if (truncadoTotal) {
-    encabezadoResumen = `[DATOS PARCIALES / TRUNCADOS] Lectura cortada por límite de 20 páginas (se leyeron comprobantes hasta ${
+    encabezadoResumen = `[DATOS PARCIALES / TRUNCADOS] Lectura cortada por límite de páginas (se leyeron comprobantes hasta ${
       actualData.ultimaFechaLeida || "fecha de corte"
     }). No se calculan variaciones porcentuales sobre períodos incompletos. `;
   }

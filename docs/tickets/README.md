@@ -11,10 +11,10 @@
 
 | Categoría | Total | Finalizados | Backlog (Fase 2 / 3) |
 |---|---|---|---|
-| **Bugs (Defectos)** | 15 | 12 | 3 |
-| **Mejoras (Features & UX)** | 16 | 11 | 5 |
+| **Bugs (Defectos)** | 15 | 13 | 2 |
+| **Mejoras (Features & UX)** | 17 | 12 | 5 |
 | **Operaciones & Diagnóstico** | 1 | 1 | 0 |
-| **Total Items** | **32** | **24** | **8** |
+| **Total Items** | **33** | **26** | **7** |
 
 ---
 
@@ -28,7 +28,7 @@
 | **BUG-01** | Las notas de crédito suman al total de ventas en vez de restar | `resumen_ventas` | Crítico | Fase 1 | **FINALIZADO** | [BUG-01.md](./BUG-01.md) |
 | **BUG-02** | Agrupar por producto o rubro devuelve "Ítems no detallados" y unidades en 0 | `resumen_ventas` | Crítico | Fase 2 | **BACKLOG** | [BUG-02.md](./BUG-02.md) |
 | **BUG-03** | `incluir_items=true` devuelve `items: []` | `listar_ventas` | Alto | Fase 2 | **BACKLOG** | [BUG-03.md](./BUG-03.md) |
-| **BUG-04** | El campo producto devuelve el código en lugar del nombre | `stock_por_deposito` | Alto | Fase 2 | **BACKLOG** | [BUG-04.md](./BUG-04.md) |
+| **BUG-04** | El campo producto devuelve el código en lugar del nombre | `stock_por_deposito` | Alto | Fase 1.3 | **FINALIZADO** | [BUG-04.md](./BUG-04.md) |
 | **BUG-13** | Un cliente vacío ("   ") aparece como cliente y suma a clientes únicos | `resumen_ventas`, `cuentas_por_cobrar` | Medio | Fase 1.1 | **FINALIZADO** | [BUG-13.md](./BUG-13.md) |
 | **BUG-05** | `cantidad_comprobantes` cuenta las notas de crédito como ventas | `resumen_ventas` | Medio | Fase 1 | **FINALIZADO** | [BUG-05.md](./BUG-05.md) |
 | **BUG-06** | La advertencia de sobreventa se dispara con stock negativo sin reservas | `stock_por_deposito` | Medio | Fase 1 | **FINALIZADO** | [BUG-06.md](./BUG-06.md) |
@@ -44,6 +44,7 @@
 
 | ID | Título | Pregunta / Necesidad de Negocio | Fase | Estado | Ticket Doc |
 |---|---|---|---|---|---|
+| **MEJ-17** | Blindaje contra truncamiento prematuro por cotizaciones en cuentas de alto volumen (`chunkedDateGet`) | *¿Cómo consolido el mes completo sin perder la segunda quincena?* | Fase 1.3 | **FINALIZADO** | [MEJ-17.md](./MEJ-17.md) |
 | **MEJ-01** | Separar en `resumen_ventas` facturado bruto, notas de crédito y neto | *¿Cuánto vendí y cuánto me devolvieron?* | Fase 1 | **FINALIZADO** | [MEJ-01.md](./MEJ-01.md) |
 | **MEJ-02** | Partir el rango en tramos dentro de `resumen_ventas` y `listar_ventas` | *¿Cómo vengo en el año?* | Fase 2 | **BACKLOG** | [MEJ-02.md](./MEJ-02.md) |
 | **MEJ-03** | Comparación interanual (mismo período año anterior) | *¿Vendo más que el mismo mes del año pasado?* | Fase 2 | **BACKLOG** | [MEJ-03.md](./MEJ-03.md) |

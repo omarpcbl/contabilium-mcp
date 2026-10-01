@@ -114,6 +114,15 @@ export function subDays(dateOrStr, days) {
 }
 
 /**
+ * Suma N días a una fecha (YYYY-MM-DD o Date) y devuelve string YYYY-MM-DD
+ */
+export function addDays(dateOrStr, days) {
+  const d = typeof dateOrStr === "string" ? new Date(dateOrStr + "T00:00:00Z") : new Date(dateOrStr);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().split("T")[0];
+}
+
+/**
  * Obtiene string YYYY-MM
  */
 export function getYearMonth(dateStr) {
