@@ -795,7 +795,7 @@ describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
       assert.match(stockIssue.descripcion, /solicitado 3, disponible 1/);
     });
 
-    it("informa orden limpia en Contabilium y orienta a revisar webhook o middleware del partner", async () => {
+    it("informa explícitamente sin diagnóstico local cuando la orden está limpia y solicita telemetría de Fase 2 (Regla Leitex C14)", async () => {
       const mockClient = {
         country: "AR",
         get: async (endpoint, params) => {
@@ -809,7 +809,7 @@ describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
             return { Codigo: "LUNA-SKU-1", StockActual: 20, StockReservado: 0 };
           }
           if (endpoint === "/clientes/search") {
-            return { Items: [{ Id: 10, NroDoc: "20123456786", RazonSocial: "Cliente Luna Valido" }] };
+            return { Items: [{ Id: 10, NroDoc: "20123456786", RazonSocial: "Cliente Luna Valido", CondicionIva: "Responsable Inscripto" }] };
           }
           return null;
         },
@@ -819,17 +819,141 @@ describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
         {
           referencia_externa: "LUNA-9921",
           canal_origen: "Luna",
-          cliente: { cuit_o_dni: "20123456786", razon_social: "Cliente Luna Valido" },
+          tipo_documento_enviado: "CUIT",
+          cliente: { cuit_o_dni: "20123456786", razon_social: "Cliente Luna Valido", condicion_iva: "Responsable Inscripto" },
           items: [{ sku: "LUNA-SKU-1", cantidad: 1 }],
         },
         mockClient
       );
 
       const parsed = JSON.parse(result.content[0].text);
-      assert.equal(parsed.datos.estado, "APTO_REVISAR_INTEGRACION_EXTERNA");
+      assert.equal(parsed.datos.estado, "SIN_DIAGNOSTICO_CON_INFORMACION_DISPONIBLE");
       assert.equal(parsed.datos.bloqueantes.length, 0);
-      assert.match(parsed.resumen, /el bloqueo está en el webhook, cola o credenciales/);
-      assert.ok(parsed.datos.acciones_recomendadas[0].includes("logs del middleware o webhook de Luna"));
+      assert.match(parsed.resumen, /no se detectaron errores ni una causa concluyente local/i);
+      assert.ok(parsed.datos.datos_faltantes_fase_2.length >= 2);
+      assert.ok(parsed.datos.datos_faltantes_fase_2.some((d) => d.includes("access_rest.contabilium.log")));
+      assert.ok(parsed.datos.acciones_recomendadas[0].includes("No asumir error del partner sin evidencia"));
+    });
+
+    it("detecta uso de endpoint incorrecto comprobantes/emitirFECobrada (Caso C1)", async () => {
+      const mockClient = { country: "AR", get: async () => null };
+
+      const result = await diagnosticarOrden.handler(
+        {
+          referencia_externa: "ORD-1084",
+          endpoint_utilizado: "comprobantes/emitirFECobrada",
+        },
+        mockClient
+      );
+
+      const parsed = JSON.parse(result.content[0].text);
+      assert.equal(parsed.datos.estado, "ERROR_CONTRATO_PARTNER");
+      const c1 = parsed.datos.causas_detectadas.find((c) => c.codigo === "ENDPOINT_INCORRECTO_C1");
+      assert.ok(c1);
+      assert.match(c1.descripcion, /no actualiza el estado de la orden de venta/i);
+      assert.ok(c1.accion_recomendada.includes("ordenesventa/emitirFE"));
+    });
+
+    it("detecta discrepancia tipográfica en Condición de Venta (Caso C2)", async () => {
+      const mockClient = {
+        country: "AR",
+        get: async (endpoint) => {
+          if (endpoint === "/opciones/condiciones-venta") {
+            return [{ Id: 1, Nombre: "MercadoPago" }, { Id: 2, Nombre: "Cuenta Corriente" }];
+          }
+          return null;
+        },
+      };
+
+      const result = await diagnosticarOrden.handler(
+        {
+          referencia_externa: "ORD-1085",
+          condicion_venta: "Mercado Pago", // Con espacio vs sin espacio en Contabilium
+        },
+        mockClient
+      );
+
+      const parsed = JSON.parse(result.content[0].text);
+      assert.equal(parsed.datos.estado, "ERROR_CONTRATO_PARTNER");
+      const c2 = parsed.datos.causas_detectadas.find((c) => c.codigo === "CONDICION_VENTA_NO_COINCIDE_C2");
+      assert.ok(c2);
+      assert.match(c2.descripcion, /no coincide de forma exacta/i);
+      assert.ok(c2.accion_recomendada.includes("MercadoPago"));
+    });
+
+    it("desambigua 'orden inexistente' por borrador huérfano tras rechazo de ARCA (Caso C3)", async () => {
+      const mockClient = {
+        country: "AR",
+        get: async (endpoint) => {
+          if (endpoint === "/comprobantes/search") {
+            return {
+              Items: [
+                {
+                  Id: 7701,
+                  TipoFc: "Factura B (Borrador)",
+                  IdEstado: 0,
+                  Observaciones: "Orden FEN-1145 rechazada por ARCA fecha anterior",
+                },
+              ],
+            };
+          }
+          return null;
+        },
+      };
+
+      const result = await diagnosticarOrden.handler(
+        {
+          referencia_externa: "FEN-1145",
+          error_recibido: "La orden de venta es inexistente",
+        },
+        mockClient
+      );
+
+      const parsed = JSON.parse(result.content[0].text);
+      assert.equal(parsed.datos.estado, "BLOQUEANTE_DETECTADO");
+      const c3 = parsed.datos.causas_detectadas.find((c) => c.codigo === "BORRADOR_HUERFANO_ARCA_C3");
+      assert.ok(c3);
+      assert.match(c3.descripcion, /dejando el borrador #7701 vinculado/);
+    });
+
+    it("detecta confusión de parámetro 'nro' con ID interno numérico (Caso C5)", async () => {
+      const mockClient = { country: "AR", get: async () => null };
+
+      const result = await diagnosticarOrden.handler(
+        {
+          referencia_externa: "FEN-1156",
+          parametro_nro: "28419", // ID numérico interno
+        },
+        mockClient
+      );
+
+      const parsed = JSON.parse(result.content[0].text);
+      assert.equal(parsed.datos.estado, "ERROR_CONTRATO_PARTNER");
+      const c5 = parsed.datos.causas_detectadas.find((c) => c.codigo === "CONFUSION_PARAMETRO_NRO_C5");
+      assert.ok(c5);
+      assert.match(c5.descripcion, /ID secuencial interno/);
+    });
+
+    it("reconoce defecto conocido DEF-C11 de alta de cliente con CUIT como Consumidor Final", async () => {
+      const mockClient = { country: "AR", get: async () => null };
+
+      const result = await diagnosticarOrden.handler(
+        {
+          referencia_externa: "HEZ-1278",
+          cliente: {
+            cuit_o_dni: "20123456786", // CUIT válido
+            condicion_iva: "Consumidor Final", // Asignado erróneamente por Contabilium
+          },
+        },
+        mockClient
+      );
+
+      const parsed = JSON.parse(result.content[0].text);
+      assert.equal(parsed.datos.estado, "DEFECTO_CONOCIDO_PRODUCTO");
+      const c11 = parsed.datos.causas_detectadas.find((c) => c.codigo === "DEF-C11");
+      assert.ok(c11);
+      assert.equal(c11.ticket_jira, "API-1278");
+      assert.equal(c11.responsabilidad, "CONTABILIUM");
     });
 
     it("que_puedo_consultar expone el módulo de diagnóstico de integraciones", async () => {
