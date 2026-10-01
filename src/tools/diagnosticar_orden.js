@@ -3,19 +3,14 @@ import { formatToolResponse, parseAmount, getTodayString, validateTaxId } from "
 
 export const schema = {
   sintoma: z
-    .enum([
-      "orden_no_facturo",
-      "letra_comprobante_incorrecta",
-      "stock_no_actualiza",
-      "devolucion_nc_borrador",
-      "timeout_sincronizacion",
-      "general",
-    ])
+    .string()
+    .optional()
     .default("general")
-    .describe("Síntoma principal reportado por el partner o soporte."),
+    .describe("Síntoma principal reportado por el partner o soporte (ej: 'orden_no_facturo', 'inexistente', 'letra_comprobante_incorrecta', 'error 500', 'stock_no_actualiza', etc.)."),
   referencia_externa: z.string().describe("Número o ID de la orden en la plataforma externa (IDVentaIntegracion, ej. 'FEN-10293', 'ORD-8821', '39104')."),
   id_integracion_enviado: z.number().int().optional().describe("ID de la integración enviado en la llamada (ej. 28778)."),
   parametro_nro: z.string().optional().describe("Valor exacto pasado en el parámetro 'nro' (ej. 'FEN-10293' o ID interno '28778')."),
+  nro: z.union([z.string(), z.number()]).optional().describe("Alias alternativo del parámetro 'nro'."),
   canal_origen: z.string().optional().describe("Plataforma o integrador externo (ej. 'Fenicio', 'Base', 'Hezka', 'Vestetic', 'Luna', 'MercadoLibre', 'Producteca')."),
   endpoint_utilizado: z.string().optional().describe("Endpoint HTTP invocado por el partner (ej. 'ordenesventa/emitirFE', 'comprobantes/emitirFECobrada')."),
   condicion_venta: z.string().optional().describe("Nombre de la condición de venta enviada (ej. 'Mercado Pago', 'Contado')."),
@@ -42,7 +37,6 @@ export async function handler(args, client) {
     sintoma = "general",
     referencia_externa,
     id_integracion_enviado,
-    parametro_nro,
     canal_origen,
     endpoint_utilizado,
     condicion_venta,
@@ -53,6 +47,12 @@ export async function handler(args, client) {
     items = [],
     deposito_id,
   } = args;
+
+  const rawNro = args.parametro_nro !== undefined && args.parametro_nro !== null
+    ? String(args.parametro_nro).trim()
+    : args.nro !== undefined && args.nro !== null
+    ? String(args.nro).trim()
+    : null;
 
   const refUpper = (referencia_externa || "").trim().toUpperCase();
   const erroresBloqueantes = [];
@@ -152,19 +152,30 @@ export async function handler(args, client) {
         // Continuar
       }
 
-      // CASO C9 (API-1156): CUIL o DNI enviado para receptor que es Responsable Inscripto
+      // CASO C9 (API-1156): CUIL o DNI enviado para receptor
       const tipoDoc = (tipo_documento_enviado || "").toUpperCase();
       const condicionDestino = (cliente.condicion_iva || clienteEnCuenta?.CondicionIva || "").toUpperCase();
       const esReceptorRI = condicionDestino.includes("RESPONSABLE INSCRIPTO") || condicionDestino === "RI";
 
       if ((tipoDoc === "CUIL" || tipoDoc === "DNI") || (tipoDoc !== "CUIT" && tipoDoc.length > 0 && esReceptorRI)) {
         if (esReceptorRI || tipoDoc === "CUIL") {
+          let tituloC9;
+          let descC9;
+
+          if (esReceptorRI) {
+            tituloC9 = "TipoDocumento CUIL/DNI enviado para cliente Responsable Inscripto (Causa C9 / API-1156)";
+            descC9 = `El partner envió TipoDocumento: '${tipo_documento_enviado || 'CUIL'}' para un cliente con condición Responsable Inscripto. El padrón tributario de AFIP resuelve CUIL/DNI forzando Consumidor Final, emitiendo Factura B en lugar de la Factura A requerida por un Responsable Inscripto.`;
+          } else {
+            tituloC9 = "TipoDocumento 'CUIL' fuerza condición de Consumidor Final y emisión de Factura B (Causa C9 / API-1156)";
+            descC9 = `El partner envió TipoDocumento: '${tipo_documento_enviado || 'CUIL'}'. En Contabilium, el envío de CUIL/DNI fuerza automáticamente la emisión de Factura B como Consumidor Final. Si el comprador requiere Factura A (Responsable Inscripto), el payload debe enviar 'TipoDocumento: CUIT' y el CUIT correspondiente.`;
+          }
+
           erroresContrato.push({
             tipo: "ERROR_CONTRATO_PARTNER",
             codigo: "TIPO_DOCUMENTO_INCOMPATIBLE_C9",
-            titulo: "TipoDocumento CUIL/DNI enviado para cliente Responsable Inscripto (Causa C9 / API-1156)",
+            titulo: tituloC9,
             responsabilidad: "PARTNER",
-            descripcion: `El partner envió TipoDocumento: '${tipo_documento_enviado || 'CUIL'}'. El padrón tributario resuelve el CUIL/DNI como Consumidor Final, emitiendo Factura B en lugar de la Factura A requerida por un Responsable Inscripto.`,
+            descripcion: descC9,
             accion_recomendada: "Enviar 'TipoDocumento: CUIT' y el CUIT de facturación en el payload de la orden.",
             severidad: "ALTA",
           });
@@ -281,8 +292,10 @@ export async function handler(args, client) {
             });
             datosVerificados.push(`Stock SKU '${sku}': Actual ${actual}, Reservado ${reservado}, Disponible ${disponible}`);
 
-            // DEF-C15 (API-1256): VERIFICACIÓN ESTRICTA: Solo dispara si HAY reservas que superen al stock Y el valor reportado fue 0
-            if (reservado > actual && stockConReservasRaw !== null && stockConReservasRaw === 0) {
+            // DEF-C15 (API-1256): VERIFICACIÓN ESTRICTA
+            // Solo dispara si HAY reservas activas (reservado > 0), las reservas superan al stock (reservado > actual)
+            // Y el endpoint devolvió explícitamente 0 en StockConReservas en lugar del saldo real negativo.
+            if (reservado > 0 && reservado > actual && stockData.StockConReservas !== undefined && parseAmount(stockData.StockConReservas) === 0) {
               defectosConocidos.push({
                 tipo: "DEFECTO_CONOCIDO_PRODUCTO",
                 codigo: "DEF-C15",
@@ -322,18 +335,39 @@ export async function handler(args, client) {
   let comprobanteEmitido = null;
   let borradorHuerfano = null;
   let ordenEncontradaEnOtraIntegracion = null;
+  let ordenEncontradaEnBase = false;
 
   let fechaHasta = fecha_aproximada || getTodayString(client.country);
   const d = new Date(fechaHasta);
   d.setDate(d.getDate() - 30);
   const fechaDesde = d.toISOString().split("T")[0];
 
+  if (id_integracion_enviado) {
+    evidencias.integraciones_consultadas.push(Number(id_integracion_enviado));
+  }
+
   try {
-    const compRes = await client.get("/comprobantes/search", { fechaDesde, fechaHasta, pageSize: 50 }, 60);
+    // Búsqueda filtrada en servidor por referencia externa
+    const compRes = await client.get("/comprobantes/search", { fechaDesde, fechaHasta, filtro: referencia_externa }, 60);
     let compList = [];
     if (Array.isArray(compRes)) compList = compRes;
     else if (compRes?.Items && Array.isArray(compRes.Items)) compList = compRes.Items;
     else if (compRes?.items && Array.isArray(compRes.items)) compList = compRes.items;
+
+    // Si también se pasó parametro_nro y es distinto, buscar por ese filtro
+    if (rawNro && rawNro.toLowerCase() !== referencia_externa.toLowerCase()) {
+      try {
+        const nroRes = await client.get("/comprobantes/search", { fechaDesde, fechaHasta, filtro: rawNro }, 60);
+        const extraItems = Array.isArray(nroRes) ? nroRes : (nroRes?.Items || nroRes?.items || []);
+        for (const item of extraItems) {
+          if (!compList.some((existing) => existing.Id === item.Id)) {
+            compList.push(item);
+          }
+        }
+      } catch {
+        // Continuar
+      }
+    }
 
     for (const c of compList) {
       const obs = String(c.Observaciones || c.observaciones || "").toUpperCase();
@@ -342,6 +376,7 @@ export async function handler(args, client) {
       const matchRef = obs.includes(refUpper) || num.includes(refUpper) || (canal_origen && orig.includes(canal_origen.toUpperCase()) && obs.includes(refUpper));
 
       if (matchRef) {
+        ordenEncontradaEnBase = true;
         const isBorrador = (c.TipoFc || c.tipoFc || "").toUpperCase().includes("BORRADOR") || c.IdEstado === 0 || c.Estado === "Borrador";
         if (isBorrador) {
           borradorHuerfano = c;
@@ -365,13 +400,43 @@ export async function handler(args, client) {
 
         // C7: Chequeo de IDIntegracion en el comprobante encontrado
         const idIntComp = Number(c.IdIntegracion || c.idIntegracion);
+        if (idIntComp) evidencias.integraciones_consultadas.push(idIntComp);
         if (id_integracion_enviado && idIntComp && idIntComp !== Number(id_integracion_enviado)) {
           ordenEncontradaEnOtraIntegracion = idIntComp;
         }
       }
     }
 
-    datosVerificados.push(`Búsqueda de comprobantes en ventana ${fechaDesde} al ${fechaHasta}: ${compList.length} registros revisados`);
+    // Búsqueda en /ordenesVenta/search si no se encontró comprobante
+    if (!comprobanteEmitido && !borradorHuerfano) {
+      try {
+        const ordRes = await client.get("/ordenesVenta/search", { fechaDesde, fechaHasta, filtro: referencia_externa }, 60);
+        const ordItems = Array.isArray(ordRes) ? ordRes : (ordRes?.Items || ordRes?.items || []);
+        const matchOrd = ordItems.find((o) => {
+          const numOrd = String(o.NumeroOrden || o.numeroOrden || o.IdVentaIntegracion || "").toUpperCase();
+          return numOrd === refUpper || numOrd.includes(refUpper);
+        });
+
+        if (matchOrd) {
+          ordenEncontradaEnBase = true;
+          const idIntOrd = Number(matchOrd.IdIntegracion || matchOrd.idIntegracion);
+          if (idIntOrd) evidencias.integraciones_consultadas.push(idIntOrd);
+          if (id_integracion_enviado && idIntOrd && idIntOrd !== Number(id_integracion_enviado)) {
+            ordenEncontradaEnOtraIntegracion = idIntOrd;
+          }
+        }
+      } catch {
+        // Continuar
+      }
+    }
+
+    evidencias.integraciones_consultadas = [...new Set(evidencias.integraciones_consultadas)];
+
+    if (compList.length > 0 || ordenEncontradaEnBase) {
+      datosVerificados.push(`Búsqueda dirigida por '${referencia_externa}' en comprobantes y órdenes (${fechaDesde} al ${fechaHasta}): ${compList.length} coincidencias`);
+    } else {
+      datosVerificados.push(`Búsqueda dirigida por '${referencia_externa}' en comprobantes y órdenes (${fechaDesde} al ${fechaHasta}): sin coincidencias`);
+    }
   } catch (err) {
     advertencias.push(`No se pudo consultar comprobantes: ${err.message}`);
   }
@@ -389,7 +454,7 @@ export async function handler(args, client) {
     });
   }
 
-  // CASO C7: La orden existe en otra integración de la cuenta
+  // CASO C7: La orden existe en otra integración de la cuenta o advertencia de integración
   if (ordenEncontradaEnOtraIntegracion) {
     erroresContrato.push({
       tipo: "ERROR_CONTRATO_PARTNER",
@@ -400,8 +465,10 @@ export async function handler(args, client) {
       accion_recomendada: `Cambiar el parámetro idIntegracion a ${ordenEncontradaEnOtraIntegracion} en la llamada del partner.`,
       severidad: "ALTA",
     });
-  } else if (id_integracion_enviado) {
-    evidencias.integraciones_consultadas.push(id_integracion_enviado);
+  } else if (id_integracion_enviado && !ordenEncontradaEnBase && !comprobanteEmitido) {
+    advertencias.push(
+      `No se encontró la orden bajo la integración ID ${id_integracion_enviado}. Si la tienda cuenta con múltiples integraciones activas, verifique si la orden ingresó bajo otro idIntegracion (Causa C7).`
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -423,45 +490,50 @@ export async function handler(args, client) {
     }
   }
 
-  // CASO C2: Condición de venta
+  // CASO C2: Condición de venta consultando /usuarios/condicionesVenta
   if (condicion_venta) {
     try {
-      const condList = await client.get("/opciones/condiciones-venta", null, 1800);
-      if (Array.isArray(condList) && condList.length > 0) {
-        const exactMatch = condList.some((c) => (c.Nombre || c.nombre || "").trim() === condicion_venta.trim());
+      const condList = await client.get("/usuarios/condicionesVenta", null, 1800);
+      let listaCond = [];
+      if (Array.isArray(condList)) listaCond = condList;
+      else if (condList?.Items && Array.isArray(condList.Items)) listaCond = condList.Items;
+      else if (condList?.items && Array.isArray(condList.items)) listaCond = condList.items;
+
+      if (listaCond.length > 0) {
+        const exactMatch = listaCond.some((c) => (c.Nombre || c.nombre || "").trim() === condicion_venta.trim());
         if (!exactMatch) {
-          const similar = condList.find((c) => (c.Nombre || c.nombre || "").replace(/\s+/g, "").toLowerCase() === condicion_venta.replace(/\s+/g, "").toLowerCase());
+          const similar = listaCond.find((c) => (c.Nombre || c.nombre || "").replace(/\s+/g, "").toLowerCase() === condicion_venta.replace(/\s+/g, "").toLowerCase());
+          const nombresDisponibles = listaCond.map((c) => `'${c.Nombre || c.nombre}'`).join(", ");
+
           erroresContrato.push({
             tipo: "ERROR_CONTRATO_PARTNER",
             codigo: "CONDICION_VENTA_NO_COINCIDE_C2",
             titulo: "Discrepancia en nombre de Condición de Venta (Causa C2)",
             responsabilidad: "PARTNER",
-            descripcion: `La condición de venta '${condicion_venta}' enviada por el partner no coincide exactamente con las de la cuenta.${similar ? ` Nombre exacto en Contabilium: '${similar.Nombre || similar.nombre}'.` : ""}`,
-            accion_recomendada: similar ? `Enviar '${similar.Nombre || similar.nombre}' respetando mayúsculas y espacios.` : "Dar de alta la condición de venta en Contabilium.",
+            descripcion: `La condición de venta '${condicion_venta}' enviada por el partner no coincide exactamente con las configuradas en la cuenta de Contabilium.${similar ? ` Nombre exacto configurado: '${similar.Nombre || similar.nombre}'.` : ` Opciones disponibles: ${nombresDisponibles}.`}`,
+            accion_recomendada: similar ? `Cambiar el valor a '${similar.Nombre || similar.nombre}' (respetando espacios y mayúsculas).` : `Dar de alta la condición de venta en Contabilium o usar una existente: ${nombresDisponibles}.`,
             severidad: "ALTA",
           });
         } else {
           datosVerificados.push(`Condición de venta '${condicion_venta}' coincide exactamente con la cuenta`);
         }
       }
-    } catch {
-      // Continuar
+    } catch (err) {
+      advertencias.push(`No se pudo verificar condiciones de venta: ${err.message}`);
     }
   }
 
-  // CASO C5: Parámetro nro confundido con ID interno
-  if (parametro_nro !== undefined && parametro_nro !== null) {
-    const isPurelyNumeric = /^\d{1,8}$/.test(String(parametro_nro).trim());
-    const difiereDeReferencia = String(parametro_nro).trim() !== String(referencia_externa).trim();
-
-    if (isPurelyNumeric && difiereDeReferencia) {
+  // CASO C5: Parámetro nro distinto de la referencia externa / IDVentaIntegracion
+  if (rawNro && referencia_externa) {
+    const difiereDeReferencia = rawNro.toLowerCase() !== String(referencia_externa).trim().toLowerCase();
+    if (difiereDeReferencia) {
       erroresContrato.push({
         tipo: "ERROR_CONTRATO_PARTNER",
         codigo: "CONFUSION_PARAMETRO_NRO_C5",
-        titulo: "Parámetro 'nro' con ID interno en vez de IDVentaIntegracion (Causa C5)",
+        titulo: "Parámetro 'nro' distinto de la referencia externa / IDVentaIntegracion (Causa C5)",
         responsabilidad: "PARTNER",
-        descripcion: `El parámetro 'nro' enviado ('${parametro_nro}') contiene un ID numérico interno de base de datos. El contrato real de ordenesventa/emitirFE espera el IDVentaIntegracion ('${referencia_externa}').`,
-        accion_recomendada: `Pasar el IDVentaIntegracion ('${referencia_externa}') en el parámetro 'nro'.`,
+        descripcion: `El parámetro 'nro' enviado ('${rawNro}') difiere de la referencia externa de la orden ('${referencia_externa}'). El contrato de ordenesventa/emitirFE espera el IDVentaIntegracion ('${referencia_externa}') en el parámetro 'nro'. Enviar un ID interno u otro valor provoca que Contabilium busque una orden que no existe y devuelva el error 'La orden de venta es inexistente'.`,
+        accion_recomendada: `Pasar el IDVentaIntegracion ('${referencia_externa}') en el parámetro 'nro' en lugar de '${rawNro}'.`,
         severidad: "ALTA",
       });
     }
@@ -483,26 +555,26 @@ export async function handler(args, client) {
     }
   }
 
-  // CASO C6: Catch silencioso de 500 (Hezka) - SOLO SI SE DESCARTARON C3, C5, C7, C8 y no hay errores de contrato
-  if (error_recibido && (error_recibido.includes("500") || error_recibido.toLowerCase().includes("inexistente"))) {
-    const tieneC3 = erroresBloqueantes.some((e) => e.codigo === "BORRADOR_HUERFANO_ARCA_C3");
-    const tieneC5 = erroresContrato.some((e) => e.codigo === "CONFUSION_PARAMETRO_NRO_C5");
-    const tieneC7 = erroresContrato.some((e) => e.codigo === "ID_INTEGRACION_INCORRECTO_C7");
+  // CASO C6: Catch silencioso de 500 (Hezka / API-1145)
+  // REGLA ESTRICTA: C6 SOLO PUEDE DISPARARSE DESPUÉS DE BUSCAR LA ORDEN Y DESCARTAR C3, C5, C7 Y C8
+  // Y REQUIERE QUE LA ORDEN HAYA SIDO LOCALIZADA EN LA BASE DE DATOS.
+  const tieneC3 = erroresBloqueantes.some((e) => e.codigo === "BORRADOR_HUERFANO_ARCA_C3");
+  const tieneC5 = erroresContrato.some((e) => e.codigo === "CONFUSION_PARAMETRO_NRO_C5");
+  const tieneC7 = erroresContrato.some((e) => e.codigo === "ID_INTEGRACION_INCORRECTO_C7");
 
-    if (!tieneC3 && !tieneC5 && !tieneC7 && !comprobanteEmitido && erroresBloqueantes.length === 0 && erroresContrato.length === 0) {
-      const isHezka = (canal_origen || "").toLowerCase().includes("hezka") || (canal_origen || "").toLowerCase().includes("base");
-      if (isHezka) {
-        defectosConocidos.push({
-          tipo: "DEFECTO_CONOCIDO_PRODUCTO",
-          codigo: "DEF-C6",
-          titulo: "Catch silencioso en backend ante error 500 sin traza en Grafana (Hezka / API-1145)",
-          ticket_jira: "API-1145",
-          responsabilidad: "CONTABILIUM",
-          descripcion: "Defecto en backend: la orden existe previamente en la base de datos pero la llamada entra en un bloque catch sin log detallado en Grafana.",
-          accion_recomendada: "Escalar a Desarrollo con fecha y número de orden exacto para revisión de base de datos primaria.",
-          severidad: "ALTA",
-        });
-      }
+  if (ordenEncontradaEnBase && !tieneC3 && !tieneC5 && !tieneC7 && !comprobanteEmitido) {
+    const errText = String(error_recibido || "").toLowerCase();
+    if (errText.includes("500") || (errText.includes("inexistente") && ((canal_origen || "").toLowerCase().includes("hezka") || (canal_origen || "").toLowerCase().includes("base")))) {
+      defectosConocidos.push({
+        tipo: "DEFECTO_CONOCIDO_PRODUCTO",
+        codigo: "DEF-C6",
+        titulo: "Catch silencioso en backend ante error 500 sin traza en Grafana (Hezka / API-1145)",
+        ticket_jira: "API-1145",
+        responsabilidad: "CONTABILIUM",
+        descripcion: `Para la orden '${referencia_externa}', la orden fue confirmada en la base de datos de la cuenta pero la llamada a emitirFE falló debido a un bloque catch silencioso en el backend sin traza en Grafana.`,
+        accion_recomendada: "Escalar a Desarrollo con número de orden y fecha para revisión de base de datos primaria.",
+        severidad: "ALTA",
+      });
     }
   }
 

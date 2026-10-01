@@ -850,7 +850,7 @@ describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
       const mockClient = {
         country: "AR",
         get: async (endpoint) => {
-          if (endpoint === "/opciones/condiciones-venta") {
+          if (endpoint === "/usuarios/condicionesVenta" || endpoint === "/opciones/condiciones-venta") {
             return [{ Id: 1, Nombre: "MercadoPago" }];
           }
           if (endpoint === "/comprobantes/search") return { Items: [] };
@@ -872,6 +872,8 @@ describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
       const codigos = parsed.datos.causas_detectadas.map((c) => c.codigo);
       assert.ok(codigos.includes("ENDPOINT_INCORRECTO_C1"));
       assert.ok(codigos.includes("CONDICION_VENTA_NO_COINCIDE_C2"));
+      const c2 = parsed.datos.causas_detectadas.find((c) => c.codigo === "CONDICION_VENTA_NO_COINCIDE_C2");
+      assert.match(c2.descripcion, /MercadoPago/);
     });
 
     it("Caso 4: 'Inexistente', nro con ID interno 28778 distinto de la referencia (detecta C5, no C6)", async () => {
@@ -883,7 +885,7 @@ describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
       const result = await diagnosticarOrden.handler(
         {
           referencia_externa: "ORD-EXT-99",
-          parametro_nro: "28778",
+          nro: "28778",
           id_integracion_enviado: 28778,
           error_recibido: "La orden de venta es inexistente",
         },
@@ -895,6 +897,7 @@ describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
       const codigos = parsed.datos.causas_detectadas.map((c) => c.codigo);
       assert.ok(codigos.includes("CONFUSION_PARAMETRO_NRO_C5"));
       assert.equal(codigos.includes("DEF-C6"), false, "No debe culpar a C6 si el error se explica por C5");
+      assert.ok(!parsed.datos.causas_detectadas.some(c => c.descripcion.includes("la orden existe previamente")));
     });
 
     it("Caso 5: Código -3 con idIntegracion 25917 (detecta C12)", async () => {
@@ -945,7 +948,7 @@ describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
       assert.equal(codigos.includes("DEF-C15"), false, "No debe inventar stock en depósito inexistente ni disparar C15");
     });
 
-    it("Caso 7: API-1156 Hezka con CUIL enviado para cliente con CUIT", async () => {
+    it("Caso 7: API-1156 Hezka con CUIL enviado para cliente con CUIT verificado en base", async () => {
       const mockClient = {
         country: "AR",
         get: async (endpoint) => {
@@ -970,7 +973,31 @@ describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
       assert.equal(parsed.datos.estado, "ERROR_CONTRATO_PARTNER");
       const c9 = parsed.datos.causas_detectadas.find((c) => c.codigo === "TIPO_DOCUMENTO_INCOMPATIBLE_C9");
       assert.ok(c9);
+      assert.match(c9.titulo, /Responsable Inscripto/);
       assert.match(c9.descripcion, /TipoDocumento: 'CUIL'/);
+    });
+
+    it("Caso 7b: CUIL enviado sin cliente previo en cuenta ni condición informada no afirma falsamente que es RI", async () => {
+      const mockClient = {
+        country: "AR",
+        get: async () => ({ Items: [] }),
+      };
+
+      const result = await diagnosticarOrden.handler(
+        {
+          referencia_externa: "HEZ-1156-NUEVO",
+          tipo_documento_enviado: "CUIL",
+          cliente: { cuit_o_dni: "20123456786" },
+        },
+        mockClient
+      );
+
+      const parsed = JSON.parse(result.content[0].text);
+      assert.equal(parsed.datos.estado, "ERROR_CONTRATO_PARTNER");
+      const c9 = parsed.datos.causas_detectadas.find((c) => c.codigo === "TIPO_DOCUMENTO_INCOMPATIBLE_C9");
+      assert.ok(c9);
+      assert.equal(c9.titulo.includes("para cliente Responsable Inscripto"), false);
+      assert.match(c9.titulo, /fuerza condición de Consumidor Final/);
     });
 
     it("que_puedo_consultar expone el módulo de diagnóstico de integraciones", async () => {
