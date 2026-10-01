@@ -12,8 +12,9 @@
 | Categoría | Total | Finalizados | Backlog (Fase 2 / 3) |
 |---|---|---|---|
 | **Bugs (Defectos)** | 15 | 12 | 3 |
-| **Mejoras (Features)** | 16 | 11 | 5 |
-| **Total Items** | **31** | **23** | **8** |
+| **Mejoras (Features & UX)** | 16 | 11 | 5 |
+| **Operaciones & Diagnóstico** | 1 | 1 | 0 |
+| **Total Items** | **32** | **24** | **8** |
 
 ---
 
@@ -59,3 +60,11 @@
 | **MEJ-14** | Corregir y armonizar descripciones de tools (soporte de agrupación por día) | Evitar alucinaciones y habilitar curva de ventas diaria | Fase 1.2 | **FINALIZADO** | [MEJ-14.md](./MEJ-14.md) |
 | **MEJ-15** | Etiquetas de período legibles (*«Semana 27 (29/6 al 5/7)»*, *«Julio 2026»*) | Respuestas comerciales legibles sin traducción de ISO | Fase 1.2 | **FINALIZADO** | [MEJ-15.md](./MEJ-15.md) |
 | **MEJ-16** | Visualización gráfica robusta (Barras tipográficas seguras sin fallos) | Visualizar proporciones y tendencias sin riesgo de rotura | Fase 1.2 | **FINALIZADO** | [MEJ-16.md](./MEJ-16.md) |
+
+---
+
+## 🔧 Operaciones & Diagnóstico de Integraciones
+
+| ID | Título | Caso de Uso / Impacto | Fase | Estado | Ticket Doc |
+|---|---|---|---|---|---|
+| **OP-08** | Diagnóstico automatizado de órdenes e integraciones e-commerce (Fenicio, Base, Vestetic, Luna) | Reducción del TTR en ~30 tickets de soporte semestrales mediante detección heurística en cascada (comprobantes previos, CUIT/RUT, existencia de SKUs, stock disponible y diagnóstico de webhooks) | Fase 1.3 | **FINALIZADO** | [OP-08.md](./OP-08.md) |

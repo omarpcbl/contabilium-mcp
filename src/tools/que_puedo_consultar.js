@@ -3,9 +3,9 @@ import { formatToolResponse } from "../utils.js";
 
 export const schema = {
   categoria: z
-    .enum(["todos", "ventas", "stock", "deuda"])
+    .enum(["todos", "ventas", "stock", "deuda", "diagnostico"])
     .default("todos")
-    .describe("Área sobre la cual solicitar guía de preguntas y capacidades: todos, ventas, stock o deuda."),
+    .describe("Área sobre la cual solicitar guía de preguntas y capacidades: todos, ventas, stock, deuda o diagnostico."),
 };
 
 export async function handler({ categoria = "todos" }, client) {
@@ -79,6 +79,22 @@ export async function handler({ categoria = "todos" }, client) {
     ],
   };
 
+  const moduloDiagnostico = {
+    nombre: "Diagnóstico de Órdenes e Integraciones E-Commerce (OP-08)",
+    tools: ["diagnosticar_orden"],
+    capacidades: [
+      "Diagnosticar órdenes de e-commerce (Fenicio, Base, Vestetic, Luna, etc.) para detectar por qué no se facturaron.",
+      "Comprobar si el comprobante ya fue emitido previamente para evitar duplicados.",
+      "Validar algoritmo fiscal de CUIT/DNI/RUT del comprador.",
+      "Verificar existencia y estado activo de los SKUs en catálogo.",
+      "Auditar stock disponible en depósito contra la cantidad solicitada.",
+    ],
+    preguntas_ejemplo: [
+      "Diagnosticá por qué no facturó la orden 'FEN-10293' de Fenicio.",
+      "Chequeá si los SKUs 'REM-01' y 'PANT-02' tienen stock disponible para la orden 4810.",
+    ],
+  };
+
   const limites = [
     "Rango máximo: hasta 92 días por consulta individual de comprobantes (para períodos anuales, consultar mes por mes).",
     "Paginación segura: tope de 20 páginas (1.000 comprobantes) para garantizar respuestas rápidas y prevenir timeouts.",
@@ -100,6 +116,10 @@ export async function handler({ categoria = "todos" }, client) {
   if (categoria === "todos" || categoria === "deuda") {
     modulos.push(moduloDeuda);
     preguntasSugeridas.push(...moduloDeuda.preguntas_ejemplo.slice(0, 2));
+  }
+  if (categoria === "todos" || categoria === "diagnostico") {
+    modulos.push(moduloDiagnostico);
+    preguntasSugeridas.push(...moduloDiagnostico.preguntas_ejemplo.slice(0, 2));
   }
 
   const datos = {

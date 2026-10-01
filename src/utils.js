@@ -189,6 +189,64 @@ export function renderProgressBar(value, max, length = 10) {
 }
 
 /**
+ * Valida formato y dígito verificador de identificación fiscal según el país (AR: CUIT/DNI, CL: RUT, UY: RUT/CI).
+ */
+export function validateTaxId(taxId, country = "AR") {
+  if (!taxId) return { valido: false, motivo: "Identificación fiscal vacía" };
+  const clean = String(taxId).replace(/[^0-9kK]/g, "");
+  const c = String(country || "AR").toUpperCase();
+
+  if (c === "AR") {
+    // Si tiene 11 dígitos, es CUIT/CUIL -> validar con algoritmo módulo 11
+    if (clean.length === 11) {
+      const multipliers = [5, 4, 3, 2, 7, 6, 5, 4, 3, 2];
+      let sum = 0;
+      for (let i = 0; i < 10; i++) {
+        sum += parseInt(clean[i], 10) * multipliers[i];
+      }
+      let diff = 11 - (sum % 11);
+      let verifier = diff === 11 ? 0 : diff === 10 ? 9 : diff;
+      if (verifier === parseInt(clean[10], 10)) {
+        return { valido: true, tipo: "CUIT", numero: clean };
+      }
+      return { valido: false, tipo: "CUIT", motivo: `Dígito verificador inválido para CUIT ${taxId}` };
+    }
+    // Si tiene 7 u 8 dígitos, es DNI
+    if (clean.length === 7 || clean.length === 8) {
+      return { valido: true, tipo: "DNI", numero: clean };
+    }
+    return { valido: false, motivo: `Longitud inválida para CUIT/DNI en Argentina (${clean.length} dígitos)` };
+  }
+
+  if (c === "CL") {
+    // RUT chileno: mínimo 8 caracteres (7-8 dígitos + DV)
+    if (clean.length < 8 || clean.length > 9) {
+      return { valido: false, motivo: `Longitud inválida para RUT chileno (${clean.length} caracteres)` };
+    }
+    const cuerpo = clean.slice(0, -1);
+    const dvIngresado = clean.slice(-1).toUpperCase();
+    let suma = 0;
+    let multiplo = 2;
+    for (let i = cuerpo.length - 1; i >= 0; i--) {
+      suma += parseInt(cuerpo[i], 10) * multiplo;
+      multiplo = multiplo === 7 ? 2 : multiplo + 1;
+    }
+    const dvr = 11 - (suma % 11);
+    const dvEsperado = dvr === 11 ? "0" : dvr === 10 ? "K" : String(dvr);
+    if (dvIngresado === dvEsperado) {
+      return { valido: true, tipo: "RUT", numero: clean };
+    }
+    return { valido: false, tipo: "RUT", motivo: `Dígito verificador inválido para RUT chileno ${taxId}` };
+  }
+
+  // Por defecto (UY u otros): validación básica de longitud
+  if (clean.length >= 7) {
+    return { valido: true, tipo: "TAX_ID", numero: clean };
+  }
+  return { valido: false, motivo: `Identificación fiscal no válida (${clean})` };
+}
+
+/**
  * Empaqueta la respuesta canónica obligatoria para todas las tools:
  * { datos, resumen, advertencias, truncado }
  */

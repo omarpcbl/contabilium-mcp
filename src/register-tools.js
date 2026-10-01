@@ -7,6 +7,7 @@ import * as resumenVentas from "./tools/resumen_ventas.js";
 import * as stockPorDeposito from "./tools/stock_por_deposito.js";
 import * as cuentasPorCobrar from "./tools/cuentas_por_cobrar.js";
 import * as quePuedoConsultar from "./tools/que_puedo_consultar.js";
+import * as diagnosticarOrden from "./tools/diagnosticar_orden.js";
 import * as crearBorradorFactura from "./tools/crear_borrador_factura.js";
 import * as autorizarFacturaElectronica from "./tools/autorizar_factura_electronica.js";
 import * as emitirFacturaExpress from "./tools/emitir_factura_express.js";
@@ -168,6 +169,23 @@ export function registerContabiliumTools(server, client) {
       } catch (err) {
         return {
           content: [{ type: "text", text: JSON.stringify({ error: err.message, datos: [], resumen: "Error en la consulta", advertencias: [err.message], truncado: false }, null, 2) }],
+          isError: true,
+        };
+      }
+    }
+  );
+
+  // OP-08: diagnosticar_orden (Diagnóstico de órdenes e integraciones e-commerce)
+  server.tool(
+    "diagnosticar_orden",
+    "Diagnóstico automatizado de órdenes e integraciones e-commerce (Fenicio, Base, Vestetic, Luna, etc.): detecta duplicados, valida CUIT/RUT del cliente, verifica existencia de SKUs en catálogo, revisa stock disponible en depósito y señala la causa raíz si la orden no se facturó.",
+    diagnosticarOrden.schema,
+    async (args) => {
+      try {
+        return await diagnosticarOrden.handler(args, client);
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ error: err.message, datos: null, resumen: "Error al diagnosticar orden", advertencias: [err.message], truncado: false }, null, 2) }],
           isError: true,
         };
       }

@@ -6,8 +6,9 @@ import * as cuentasPorCobrar from "../src/tools/cuentas_por_cobrar.js";
 import * as buscarProductos from "../src/tools/buscar_productos.js";
 import * as quePuedoConsultar from "../src/tools/que_puedo_consultar.js";
 import * as registrarConsultaNoSoportada from "../src/tools/registrar_consulta_no_soportada.js";
+import * as diagnosticarOrden from "../src/tools/diagnosticar_orden.js";
 import { registerContabiliumTools } from "../src/register-tools.js";
-import { classifyFiscalInvoice, formatIsoWeekLabel, formatYearMonthLabel, getTodayString, renderProgressBar } from "../src/utils.js";
+import { classifyFiscalInvoice, formatIsoWeekLabel, formatYearMonthLabel, getTodayString, renderProgressBar, validateTaxId } from "../src/utils.js";
 import { SYSTEM_INSTRUCTION } from "../src/instructions.js";
 
 describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
@@ -275,6 +276,7 @@ describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
         "resumen_ventas",
         "stock_por_deposito",
         "cuentas_por_cobrar",
+        "diagnosticar_orden",
         "registrar_consulta_no_soportada",
         "contabilium_auth_status",
       ];
@@ -282,7 +284,7 @@ describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
       for (const t of expectedTools) {
         assert.equal(registeredTools.has(t), true, `La tool ${t} debe estar registrada`);
       }
-      assert.equal(registeredTools.size, 11);
+      assert.equal(registeredTools.size, 12);
     });
 
     it("SYSTEM_INSTRUCTION instruye rechazar facturación indicando que no está habilitado actualmente (MEJ-10)", () => {
@@ -656,6 +658,192 @@ describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
       assert.equal(parsed.conexionEnVivo.conectado, true);
       assert.equal(parsed.token.activo, true);
       assert.ok(parsed.token.minutosRestantes > 50);
+    });
+  });
+
+  describe("Diagnóstico de Órdenes e Integraciones E-Commerce (OP-08)", () => {
+    it("valida CUITs con algoritmo módulo 11 y discriminación fiscal", () => {
+      // 20-12345678-6: sum=148, 148%11=5, 11-5=6 -> Válido
+      const valOk = validateTaxId("20123456786", "AR");
+      assert.equal(valOk.valido, true);
+      assert.equal(valOk.tipo, "CUIT");
+
+      // Dígito verificador incorrecto
+      const valErr = validateTaxId("20123456789", "AR");
+      assert.equal(valErr.valido, false);
+      assert.match(valErr.motivo, /Dígito verificador inválido/);
+
+      // DNI válido
+      const valDni = validateTaxId("34567890", "AR");
+      assert.equal(valDni.valido, true);
+      assert.equal(valDni.tipo, "DNI");
+    });
+
+    it("detecta comprobante ya emitido evitando dobles facturaciones", async () => {
+      const mockClient = {
+        country: "AR",
+        get: async (endpoint, params) => {
+          if (endpoint === "/comprobantes/search") {
+            return {
+              Items: [
+                {
+                  Id: 4501,
+                  Numero: "B-0001-00004501",
+                  TipoFc: "FCB",
+                  FechaEmision: "2026-09-28T12:00:00",
+                  RazonSocial: "Juan Perez",
+                  ImporteTotalNeto: 15400,
+                  Observaciones: "Orden de Fenicio #FEN-98213",
+                  Origen: "Fenicio",
+                },
+              ],
+            };
+          }
+          return null;
+        },
+      };
+
+      const result = await diagnosticarOrden.handler(
+        {
+          referencia_externa: "FEN-98213",
+          canal_origen: "Fenicio",
+          fecha_aproximada: "2026-09-29",
+        },
+        mockClient
+      );
+
+      const parsed = JSON.parse(result.content[0].text);
+      assert.equal(parsed.datos.estado, "COMPROBANTE_YA_EMITIDO");
+      assert.equal(parsed.datos.checks.comprobante_previo.encontrado, true);
+      assert.equal(parsed.datos.checks.comprobante_previo.numero, "B-0001-00004501");
+      assert.match(parsed.resumen, /ya fue emitida previamente/);
+    });
+
+    it("detecta SKU inexistente y CUIT inválido como bloqueantes críticos", async () => {
+      const mockClient = {
+        country: "AR",
+        get: async (endpoint, params) => {
+          if (endpoint === "/comprobantes/search") {
+            return { Items: [] };
+          }
+          if (endpoint === "/conceptos/search") {
+            // El SKU no existe en catálogo
+            return { Items: [] };
+          }
+          return null;
+        },
+      };
+
+      const result = await diagnosticarOrden.handler(
+        {
+          referencia_externa: "BASE-4011",
+          canal_origen: "Base",
+          cliente: { cuit_o_dni: "20123456789", razon_social: "Comprador Falso" }, // CUIT inválido
+          items: [{ sku: "ZAPATILLA-RUN-42", cantidad: 2 }],
+        },
+        mockClient
+      );
+
+      const parsed = JSON.parse(result.content[0].text);
+      assert.equal(parsed.datos.estado, "BLOQUEANTE_DETECTADO");
+      assert.equal(parsed.datos.bloqueantes.length, 2);
+
+      const codigos = parsed.datos.bloqueantes.map((b) => b.codigo);
+      assert.ok(codigos.includes("CLIENTE_DOCUMENTO_INVALIDO"));
+      assert.ok(codigos.includes("SKU_INEXISTENTE"));
+      assert.ok(parsed.datos.acciones_recomendadas.some((a) => a.includes("Dar de alta el SKU")));
+    });
+
+    it("detecta stock insuficiente en el depósito asignado", async () => {
+      const mockClient = {
+        country: "AR",
+        get: async (endpoint, params) => {
+          if (endpoint === "/comprobantes/search") {
+            return { Items: [] };
+          }
+          if (endpoint === "/conceptos/search") {
+            return {
+              Items: [
+                { Id: 88, Codigo: "REM-01", Nombre: "Remera Blanca", Activo: true, Estado: "A" },
+              ],
+            };
+          }
+          if (endpoint === "/inventarios/getStockBySKU") {
+            return {
+              Codigo: "REM-01",
+              StockActual: 5,
+              StockReservado: 4, // Disponible = 1
+            };
+          }
+          return null;
+        },
+      };
+
+      const result = await diagnosticarOrden.handler(
+        {
+          referencia_externa: "VEST-1002",
+          canal_origen: "Vestetic",
+          items: [{ sku: "REM-01", cantidad: 3 }], // Requiere 3 pero solo hay 1 disponible
+        },
+        mockClient
+      );
+
+      const parsed = JSON.parse(result.content[0].text);
+      assert.equal(parsed.datos.estado, "BLOQUEANTE_DETECTADO");
+      const stockIssue = parsed.datos.bloqueantes.find((b) => b.codigo === "STOCK_INSUFICIENTE");
+      assert.ok(stockIssue);
+      assert.match(stockIssue.descripcion, /solicitado 3, disponible 1/);
+    });
+
+    it("informa orden limpia en Contabilium y orienta a revisar webhook o middleware del partner", async () => {
+      const mockClient = {
+        country: "AR",
+        get: async (endpoint, params) => {
+          if (endpoint === "/comprobantes/search") return { Items: [] };
+          if (endpoint === "/conceptos/search") {
+            return {
+              Items: [{ Id: 99, Codigo: "LUNA-SKU-1", Nombre: "Vestido Luna", Activo: true, Estado: "A" }],
+            };
+          }
+          if (endpoint === "/inventarios/getStockBySKU") {
+            return { Codigo: "LUNA-SKU-1", StockActual: 20, StockReservado: 0 };
+          }
+          if (endpoint === "/clientes/search") {
+            return { Items: [{ Id: 10, NroDoc: "20123456786", RazonSocial: "Cliente Luna Valido" }] };
+          }
+          return null;
+        },
+      };
+
+      const result = await diagnosticarOrden.handler(
+        {
+          referencia_externa: "LUNA-9921",
+          canal_origen: "Luna",
+          cliente: { cuit_o_dni: "20123456786", razon_social: "Cliente Luna Valido" },
+          items: [{ sku: "LUNA-SKU-1", cantidad: 1 }],
+        },
+        mockClient
+      );
+
+      const parsed = JSON.parse(result.content[0].text);
+      assert.equal(parsed.datos.estado, "APTO_REVISAR_INTEGRACION_EXTERNA");
+      assert.equal(parsed.datos.bloqueantes.length, 0);
+      assert.match(parsed.resumen, /el bloqueo está en el webhook, cola o credenciales/);
+      assert.ok(parsed.datos.acciones_recomendadas[0].includes("logs del middleware o webhook de Luna"));
+    });
+
+    it("que_puedo_consultar expone el módulo de diagnóstico de integraciones", async () => {
+      const mockClient = {
+        ambiente: "Producción",
+        get: async () => null,
+      };
+
+      const res = await quePuedoConsultar.handler({ categoria: "diagnostico" }, mockClient);
+      const parsed = JSON.parse(res.content[0].text);
+
+      assert.equal(parsed.datos.modulos.length, 1);
+      assert.equal(parsed.datos.modulos[0].nombre, "Diagnóstico de Órdenes e Integraciones E-Commerce (OP-08)");
+      assert.ok(parsed.datos.modulos[0].tools.includes("diagnosticar_orden"));
     });
   });
 
