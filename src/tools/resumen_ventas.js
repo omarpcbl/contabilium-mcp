@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { diffDays, formatCurrency, formatToolResponse, getIsoWeek, getYearMonth, parseAmount, subDays } from "../utils.js";
+import { classifyFiscalInvoice, diffDays, formatCurrency, formatToolResponse, getIsoWeek, getYearMonth, parseAmount, subDays } from "../utils.js";
 
 export const schema = {
   fecha_desde: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato YYYY-MM-DD requerido").describe("Fecha inicial de ventas (YYYY-MM-DD)."),
@@ -41,12 +41,24 @@ export async function handler({ fecha_desde, fecha_hasta, agrupar_por, top, comp
     let cantidadFacturasGeneral = 0;
     let cantidadNcGeneral = 0;
     let unidadesGeneral = 0;
+    let cotizacionesExcluidas = 0;
+    let ultimaFechaLeida = null;
     const clientesUnicosGeneral = new Set();
 
     for (const c of items) {
-      const tipo = (c.TipoFc || c.tipoFc || "").toUpperCase().trim();
-      // Las notas de crédito restan (BUG-01)
-      const esNC = tipo.startsWith("NC");
+      const fechaComp = (c.FechaEmision || c.fechaEmision || "").slice(0, 10);
+      if (fechaComp) ultimaFechaLeida = fechaComp;
+
+      const tipoRaw = c.TipoFc || c.tipoFc || "";
+      const fiscal = classifyFiscalInvoice(tipoRaw);
+
+      // Exclusión estricta de cotizaciones, presupuestos y tipos inválidos (BUG-11)
+      if (!fiscal.esFiscal) {
+        cotizacionesExcluidas += 1;
+        continue;
+      }
+
+      const esNC = fiscal.esNC;
       const rawMontoAbsoluto = Math.abs(parseAmount(c.ImporteTotalNeto ?? c.Total ?? c.ImporteTotalBruto ?? 0));
       const rawMonto = esNC ? -rawMontoAbsoluto : rawMontoAbsoluto;
 
@@ -58,8 +70,14 @@ export async function handler({ fecha_desde, fecha_hasta, agrupar_por, top, comp
         cantidadFacturasGeneral += 1;
       }
 
-      const clienteIdentificador = String(c.IdCliente || c.idCliente || c.RazonSocial || c.razonSocial || "Consumidor Final").trim();
-      clientesUnicosGeneral.add(clienteIdentificador);
+      // Sanitización de cliente: excluir espacios vacíos y unificar Consumidor Final (BUG-13)
+      let clienteRaw = String(c.RazonSocial || c.razonSocial || "").trim();
+      let clienteIdentificador = clienteRaw.length > 0 && clienteRaw !== "0" && clienteRaw !== "-1" ? clienteRaw : "Consumidor Final";
+      
+      // Agregar a clientes únicos solo si es una identidad comercial o cliente no anónimo
+      if (clienteIdentificador !== "Consumidor Final" && clienteIdentificador !== "Sin cliente informado") {
+        clientesUnicosGeneral.add(clienteIdentificador);
+      }
 
       let key = "Varios";
       if (agrupar_por === "mes") {
@@ -67,7 +85,7 @@ export async function handler({ fecha_desde, fecha_hasta, agrupar_por, top, comp
       } else if (agrupar_por === "semana") {
         key = getIsoWeek(c.FechaEmision || c.fechaEmision);
       } else if (agrupar_por === "cliente") {
-        key = c.RazonSocial || c.razonSocial || "Consumidor Final";
+        key = clienteIdentificador;
       } else if (agrupar_por === "origen") {
         const rawOrigen = (c.Origen || c.Canal || "").trim();
         key = rawOrigen.length > 0 ? rawOrigen : "Sin origen informado";
@@ -173,6 +191,7 @@ export async function handler({ fecha_desde, fecha_hasta, agrupar_por, top, comp
 
     const totalNeto = totalFacturado - totalNotasCredito;
     const ticketPromedio = cantidadFacturasGeneral > 0 ? Math.round((totalFacturado / cantidadFacturasGeneral) * 100) / 100 : 0;
+    const conteoClientesUnicos = clientesUnicosGeneral.size === 0 && (cantidadFacturasGeneral > 0 || cantidadNcGeneral > 0) ? 1 : clientesUnicosGeneral.size;
 
     return {
       grupos,
@@ -183,8 +202,10 @@ export async function handler({ fecha_desde, fecha_hasta, agrupar_por, top, comp
       cantidadFacturasGeneral,
       cantidadNcGeneral,
       unidadesGeneral: Math.round(unidadesGeneral * 100) / 100,
-      clientesUnicosGeneral,
+      clientesUnicosGeneral: conteoClientesUnicos,
       ticketPromedio,
+      cotizacionesExcluidas,
+      ultimaFechaLeida,
     };
   }
 
@@ -225,7 +246,9 @@ export async function handler({ fecha_desde, fecha_hasta, agrupar_por, top, comp
         const prevG = anteriorData.grupos.get(g.grupo);
         const totalAnt = prevG ? Math.round(prevG.total * 100) / 100 : 0;
         fila.total_anterior = totalAnt;
-        fila.variacion_pct = totalAnt !== 0 ? Math.round(((fila.total - totalAnt) / Math.abs(totalAnt)) * 1000) / 10 : null;
+        // Si hay datos truncados, no calcular porcentajes engañosos (BUG-12)
+        fila.variacion_pct =
+          truncadoTotal || totalAnt === 0 ? null : Math.round(((fila.total - totalAnt) / Math.abs(totalAnt)) * 1000) / 10;
       }
 
       return fila;
@@ -233,21 +256,37 @@ export async function handler({ fecha_desde, fecha_hasta, agrupar_por, top, comp
     .sort((a, b) => b.total - a.total)
     .slice(0, top);
 
-  const advertencias = [];
+  const advertencias = [
+    // Siempre responder que se excluyen cotizaciones (Requerimiento explícito del usuario)
+    "Se excluyen cotizaciones (COT/NCT), presupuestos y comprobantes no fiscales de los totales de venta.",
+  ];
+
+  if (actualData.cotizacionesExcluidas > 0) {
+    advertencias.push(`Se detectaron y omitieron ${actualData.cotizacionesExcluidas} comprobantes no fiscales / cotizaciones.`);
+  }
   if (agrupar_por === "origen") {
     advertencias.push("En ventas de algunas integraciones Origen o Canal vienen vacíos. Se agrupan como 'Sin origen informado'.");
   }
   if (truncadoTotal) {
-    advertencias.push("Consulta limitada por tope de 20 páginas. Se sugiere acotar el rango de fechas para mayor precisión.");
+    advertencias.push(
+      `Consulta limitada por tope de 20 páginas de la API (última fecha alcanzada: ${actualData.ultimaFechaLeida || "desconocida"}). Se sugiere acotar el rango de fechas para mayor precisión.`
+    );
   }
 
-  const resumen = `Ventas netas del período: ${formatCurrency(actualData.totalNeto)} (Facturado bruto: ${formatCurrency(
+  let encabezadoResumen = "";
+  if (truncadoTotal) {
+    encabezadoResumen = `[DATOS PARCIALES / TRUNCADOS] Lectura cortada por límite de 20 páginas (se leyeron comprobantes hasta ${
+      actualData.ultimaFechaLeida || "fecha de corte"
+    }). No se calculan variaciones porcentuales sobre períodos incompletos. `;
+  }
+
+  const resumen = `${encabezadoResumen}Ventas netas del período: ${formatCurrency(actualData.totalNeto)} (Facturado bruto: ${formatCurrency(
     actualData.totalFacturado
   )} en ${actualData.cantidadFacturasGeneral} facturas, NC: ${formatCurrency(actualData.totalNotasCredito)} en ${
     actualData.cantidadNcGeneral
   } notas de crédito). Ticket promedio: ${formatCurrency(actualData.ticketPromedio)}. Clientes únicos: ${
-    actualData.clientesUnicosGeneral.size
-  }.${anteriorData ? ` Período anterior (neto): ${formatCurrency(anteriorData.totalNeto)}.` : ""}`;
+    actualData.clientesUnicosGeneral
+  }.${anteriorData && !truncadoTotal ? ` Período anterior (neto): ${formatCurrency(anteriorData.totalNeto)}.` : ""}`;
 
   return formatToolResponse({
     datos: {
@@ -258,16 +297,18 @@ export async function handler({ fecha_desde, fecha_hasta, agrupar_por, top, comp
         cantidad_facturas: actualData.cantidadFacturasGeneral,
         cantidad_notas_credito: actualData.cantidadNcGeneral,
         cantidad_comprobantes: actualData.comprobantesGeneral,
-        clientes_unicos: actualData.clientesUnicosGeneral.size,
+        clientes_unicos: actualData.clientesUnicosGeneral,
         ticket_promedio: actualData.ticketPromedio,
         unidades: actualData.unidadesGeneral,
+        cotizaciones_excluidas: actualData.cotizacionesExcluidas,
         ...(anteriorData
           ? {
               total_anterior: anteriorData.totalNeto,
+              // Si está truncado, anular variación (BUG-12)
               variacion_total_pct:
-                anteriorData.totalNeto !== 0
-                  ? Math.round(((actualData.totalNeto - anteriorData.totalNeto) / Math.abs(anteriorData.totalNeto)) * 1000) / 10
-                  : null,
+                truncadoTotal || anteriorData.totalNeto === 0
+                  ? null
+                  : Math.round(((actualData.totalNeto - anteriorData.totalNeto) / Math.abs(anteriorData.totalNeto)) * 1000) / 10,
             }
           : {}),
       },

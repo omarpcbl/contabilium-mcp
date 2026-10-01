@@ -1,34 +1,39 @@
 # 📋 Tablero de Tickets — MCP Contabilium (Dashboards & Reporting)
 
-**Entorno de referencia:** `restapiqa.contabilium.com` / Producción  
+**Entorno de referencia:** Producción (`rest.contabilium.com`, con validez fiscal AFIP) / QA  
 **Autor:** @Omar  
 **Fecha de Apertura:** 30 de septiembre de 2026  
-**Última actualización:** 30 de septiembre de 2026  
+**Última actualización:** 30 de septiembre de 2026 (Post Re-Auditoría)  
 
 ---
 
 ## 📌 Estado General del Tablero
 
-| Categoría | Total | Finalizados (Fase 1) | Backlog (Fase 2 / 3) |
+| Categoría | Total | Finalizados (Fase 1 y 1.1) | Backlog (Fase 2 / 3) |
 |---|---|---|---|
-| **Bugs (Defectos)** | 10 | 7 | 3 |
+| **Bugs (Defectos)** | 15 | 12 | 3 |
 | **Mejoras (Features)** | 9 | 4 | 5 |
-| **Total Items** | **19** | **11** | **8** |
+| **Total Items** | **24** | **16** | **8** |
 
 ---
 
-## 🐞 Bugs (Defectos de QA)
+## 🐞 Bugs (Defectos de QA y Re-Auditoría)
 
 | ID | Título | Tool | Severidad | Fase | Estado | Ticket Doc |
 |---|---|---|---|---|---|---|
+| **BUG-15** | Las tools de facturación siguen expuestas en producción con validez fiscal | Servidor MCP | Crítico | Fase 1.1 | **FINALIZADO** | [BUG-15.md](./BUG-15.md) |
+| **BUG-11** | Ventas y deuda incluyen cotizaciones (COT, NCT) y comprobantes con tipo inválido | `resumen_ventas`, `cuentas_por_cobrar` | Crítico | Fase 1.1 | **FINALIZADO** | [BUG-11.md](./BUG-11.md) |
+| **BUG-12** | Totales y comparaciones se calculan sobre datos truncados presentados como completos | `resumen_ventas`, `cuentas_por_cobrar` | Crítico | Fase 1.1 | **FINALIZADO** | [BUG-12.md](./BUG-12.md) |
 | **BUG-01** | Las notas de crédito suman al total de ventas en vez de restar | `resumen_ventas` | Crítico | Fase 1 | **FINALIZADO** | [BUG-01.md](./BUG-01.md) |
 | **BUG-02** | Agrupar por producto o rubro devuelve "Ítems no detallados" y unidades en 0 | `resumen_ventas` | Crítico | Fase 2 | **BACKLOG** | [BUG-02.md](./BUG-02.md) |
 | **BUG-03** | `incluir_items=true` devuelve `items: []` | `listar_ventas` | Alto | Fase 2 | **BACKLOG** | [BUG-03.md](./BUG-03.md) |
 | **BUG-04** | El campo producto devuelve el código en lugar del nombre | `stock_por_deposito` | Alto | Fase 2 | **BACKLOG** | [BUG-04.md](./BUG-04.md) |
+| **BUG-13** | Un cliente vacío ("   ") aparece como cliente y suma a clientes únicos | `resumen_ventas`, `cuentas_por_cobrar` | Medio | Fase 1.1 | **FINALIZADO** | [BUG-13.md](./BUG-13.md) |
 | **BUG-05** | `cantidad_comprobantes` cuenta las notas de crédito como ventas | `resumen_ventas` | Medio | Fase 1 | **FINALIZADO** | [BUG-05.md](./BUG-05.md) |
 | **BUG-06** | La advertencia de sobreventa se dispara con stock negativo sin reservas | `stock_por_deposito` | Medio | Fase 1 | **FINALIZADO** | [BUG-06.md](./BUG-06.md) |
-| **BUG-07** | Con `truncado: true`, el resumen no dice cuántos registros se leyeron ni el total | `stock_por_deposito` | Medio | Fase 1 | **FINALIZADO** | [BUG-07.md](./BUG-07.md) |
+| **BUG-07** | Con truncado: true, el resumen no diferencia tope de API del total real | `stock_por_deposito` | Medio | Fase 1.1 | **FINALIZADO** | [BUG-07.md](./BUG-07.md) |
 | **BUG-08** | No informa el rango de fechas que usó por defecto | `cuentas_por_cobrar` | Medio | Fase 1 | **FINALIZADO** | [BUG-08.md](./BUG-08.md) |
+| **BUG-14** | El período por defecto termina el 1/10 cuando hoy es 30/9 (desfasaje UTC) | `cuentas_por_cobrar` | Bajo | Fase 1.1 | **FINALIZADO** | [BUG-14.md](./BUG-14.md) |
 | **BUG-09** | Las advertencias muestran referencias a tickets internos `(API-1267)` | `buscar_productos` | Bajo | Fase 1 | **FINALIZADO** | [BUG-09.md](./BUG-09.md) |
 | **BUG-10** | Informa token inactivo con la conexión activa | `contabilium_auth_status` | Bajo | Fase 1 | **FINALIZADO** | [BUG-10.md](./BUG-10.md) |
 

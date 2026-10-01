@@ -157,76 +157,79 @@ export function registerContabiliumTools(server, client) {
   );
 
   // ---------------------------------------------------------------------------
-  // Módulo de Facturación y Emisión Electrónica
+  // Módulo de Facturación y Emisión Electrónica (BUG-15)
+  // En el MVP de solo lectura para dashboards, las tools de facturación se ocultan
+  // por defecto para prevenir emisiones accidentales con validez fiscal.
   // ---------------------------------------------------------------------------
-
-  // 9. crear_borrador_factura (Paso 1 del Flujo Seguro)
-  server.tool(
-    "crear_borrador_factura",
-    "Paso 1 del flujo seguro: Prepara y guarda un borrador de factura en Contabilium (sin impacto fiscal ni llamada a AFIP aún) para presentar el preview interactivo al usuario.",
-    crearBorradorFactura.schema,
-    async (args) => {
-      try {
-        return await crearBorradorFactura.handler(args, client);
-      } catch (err) {
-        return {
-          content: [{ type: "text", text: JSON.stringify({ error: err.message, datos: null, resumen: "Error al crear el borrador de factura", advertencias: [err.message], truncado: false }, null, 2) }],
-          isError: true,
-        };
+  if (process.env.ENABLE_BILLING_TOOLS === "true") {
+    // 9. crear_borrador_factura (Paso 1 del Flujo Seguro)
+    server.tool(
+      "crear_borrador_factura",
+      "Paso 1 del flujo seguro: Prepara y guarda un borrador de factura en Contabilium (sin impacto fiscal ni llamada a AFIP aún) para presentar el preview interactivo al usuario.",
+      crearBorradorFactura.schema,
+      async (args) => {
+        try {
+          return await crearBorradorFactura.handler(args, client);
+        } catch (err) {
+          return {
+            content: [{ type: "text", text: JSON.stringify({ error: err.message, datos: null, resumen: "Error al crear el borrador de factura", advertencias: [err.message], truncado: false }, null, 2) }],
+            isError: true,
+          };
+        }
       }
-    }
-  );
+    );
 
-  // 10. autorizar_factura_electronica (Paso 2 del Flujo Seguro)
-  server.tool(
-    "autorizar_factura_electronica",
-    "Paso 2 del flujo seguro: Recibe el ID de un borrador ya confirmado por el humano y lo envía a autorizar ante el fisco (AFIP/SII) para obtener el CAE/Folio y el link PDF.",
-    autorizarFacturaElectronica.schema,
-    async (args) => {
-      try {
-        return await autorizarFacturaElectronica.handler(args, client);
-      } catch (err) {
-        return {
-          content: [{ type: "text", text: JSON.stringify({ error: err.message, datos: null, resumen: "Error al autorizar electrónicamente la factura ante el fisco", advertencias: [err.message], truncado: false }, null, 2) }],
-          isError: true,
-        };
+    // 10. autorizar_factura_electronica (Paso 2 del Flujo Seguro)
+    server.tool(
+      "autorizar_factura_electronica",
+      "Paso 2 del flujo seguro: Recibe el ID de un borrador ya confirmado por el humano y lo envía a autorizar ante el fisco (AFIP/SII) para obtener el CAE/Folio y el link PDF.",
+      autorizarFacturaElectronica.schema,
+      async (args) => {
+        try {
+          return await autorizarFacturaElectronica.handler(args, client);
+        } catch (err) {
+          return {
+            content: [{ type: "text", text: JSON.stringify({ error: err.message, datos: null, resumen: "Error al autorizar electrónicamente la factura ante el fisco", advertencias: [err.message], truncado: false }, null, 2) }],
+            isError: true,
+          };
+        }
       }
-    }
-  );
+    );
 
-  // 11. emitir_factura_express (Flujo Express / Directo)
-  server.tool(
-    "emitir_factura_express",
-    "Emisión express en 1 solo paso: Crea, cobra y autoriza fiscalmente la factura de forma inmediata. Usar ÚNICAMENTE si el usuario lo solicita explícitamente.",
-    emitirFacturaExpress.schema,
-    async (args) => {
-      try {
-        return await emitirFacturaExpress.handler(args, client);
-      } catch (err) {
-        return {
-          content: [{ type: "text", text: JSON.stringify({ error: err.message, datos: null, resumen: "Error en la emisión express", advertencias: [err.message], truncado: false }, null, 2) }],
-          isError: true,
-        };
+    // 11. emitir_factura_express (Flujo Express / Directo)
+    server.tool(
+      "emitir_factura_express",
+      "Emisión express en 1 solo paso: Crea, cobra y autoriza fiscalmente la factura de forma inmediata. Usar ÚNICAMENTE si el usuario lo solicita explícitamente.",
+      emitirFacturaExpress.schema,
+      async (args) => {
+        try {
+          return await emitirFacturaExpress.handler(args, client);
+        } catch (err) {
+          return {
+            content: [{ type: "text", text: JSON.stringify({ error: err.message, datos: null, resumen: "Error en la emisión express", advertencias: [err.message], truncado: false }, null, 2) }],
+            isError: true,
+          };
+        }
       }
-    }
-  );
+    );
 
-  // 12. obtener_factura_pdf
-  server.tool(
-    "obtener_factura_pdf",
-    "Obtiene el estado de emisión y la URL para visualizar y descargar el PDF oficial de una factura emitida.",
-    obtenerFacturaPdf.schema,
-    async (args) => {
-      try {
-        return await obtenerFacturaPdf.handler(args, client);
-      } catch (err) {
-        return {
-          content: [{ type: "text", text: JSON.stringify({ error: err.message, datos: null, resumen: "Error al obtener el PDF de la factura", advertencias: [err.message], truncado: false }, null, 2) }],
-          isError: true,
-        };
+    // 12. obtener_factura_pdf
+    server.tool(
+      "obtener_factura_pdf",
+      "Obtiene el estado de emisión y la URL para visualizar y descargar el PDF oficial de una factura emitida.",
+      obtenerFacturaPdf.schema,
+      async (args) => {
+        try {
+          return await obtenerFacturaPdf.handler(args, client);
+        } catch (err) {
+          return {
+            content: [{ type: "text", text: JSON.stringify({ error: err.message, datos: null, resumen: "Error al obtener el PDF de la factura", advertencias: [err.message], truncado: false }, null, 2) }],
+            isError: true,
+          };
+        }
       }
-    }
-  );
+    );
+  }
 
   // 13. registrar_consulta_no_soportada
   server.tool(

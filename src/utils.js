@@ -37,6 +37,66 @@ export function formatCurrency(num, symbol = "$") {
 }
 
 /**
+ * Obtiene la fecha actual en formato YYYY-MM-DD según la zona horaria del país (BUG-14)
+ */
+export function getTodayString(country = "AR") {
+  const c = String(country || "AR").toUpperCase();
+  const timeZone = c === "CL" ? "America/Santiago" : c === "UY" ? "America/Montevideo" : "America/Argentina/Buenos_Aires";
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
+/**
+ * Validador y clasificador de lista blanca para comprobantes fiscales de venta y deuda (BUG-11).
+ * Excluye explícitamente cotizaciones (COT, NCT), presupuestos, remitos y tipos inválidos (-1, 0, XXX, FAKE).
+ */
+export function classifyFiscalInvoice(tipoRaw) {
+  if (tipoRaw === null || tipoRaw === undefined) {
+    return { esFiscal: false, esVenta: false, esNC: false, tipoNormalizado: "DESCONOCIDO", motivo: "tipo_nulo" };
+  }
+
+  const tipo = String(tipoRaw).trim().toUpperCase();
+
+  // Exclusiones explícitas de tipos no fiscales y basura
+  if (
+    /^(COT|NCT|PRE|REM|PED|PRESUPUESTO|COTIZACION|REMITO|PEDIDO)\b/i.test(tipo) ||
+    tipo.startsWith("COT") ||
+    tipo.startsWith("NCT") ||
+    tipo === "-1" ||
+    tipo === "0" ||
+    tipo === "XXX" ||
+    tipo === "FAKE" ||
+    tipo.includes("FAKE") ||
+    tipo.includes("XXX")
+  ) {
+    return { esFiscal: false, esVenta: false, esNC: false, tipoNormalizado: tipo, motivo: "cotizacion_o_no_fiscal" };
+  }
+
+  // Notas de Crédito fiscales (restan)
+  // Ejemplos: NCA, NCB, NCC, NCE, NCM, NOTA DE CREDITO A, etc. (excluyendo NCT que ya fue descartado arriba)
+  if (/^(NC[ABCEM]|NOTA DE CR[EÉ]DITO)\b/i.test(tipo) || (tipo.startsWith("NC") && !tipo.startsWith("NCT") && tipo.length <= 4)) {
+    return { esFiscal: true, esVenta: false, esNC: true, tipoNormalizado: tipo };
+  }
+
+  // Facturas y Notas de Débito fiscales (suman)
+  // Ejemplos: FCA, FCB, FCC, FCE, FCM, NDA, NDB, NDC, NDE, NDM, FACTURA A, NOTA DE DEBITO B, etc.
+  if (
+    /^(FC[ABCEM]|ND[ABCEM]|FACTURA|NOTA DE D[EÉ]BITO)\b/i.test(tipo) ||
+    (tipo.startsWith("FC") && tipo.length <= 4) ||
+    (tipo.startsWith("ND") && tipo.length <= 4)
+  ) {
+    return { esFiscal: true, esVenta: true, esNC: false, tipoNormalizado: tipo };
+  }
+
+  // Cualquier otro tipo que no encaje en la lista blanca fiscal
+  return { esFiscal: false, esVenta: false, esNC: false, tipoNormalizado: tipo, motivo: "tipo_no_reconocido" };
+}
+
+/**
  * Calcula la diferencia en días entre dos fechas (YYYY-MM-DD)
  */
 export function diffDays(dateFromStr, dateToStr) {

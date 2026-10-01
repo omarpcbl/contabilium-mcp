@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { diffDays, formatCurrency, formatToolResponse, parseAmount, subDays } from "../utils.js";
+import { classifyFiscalInvoice, diffDays, formatCurrency, formatToolResponse, getTodayString, parseAmount, subDays } from "../utils.js";
 
 export const schema = {
   fecha_desde: z
@@ -26,7 +26,8 @@ function clasificarTramo(esVencida, diasVencido) {
 }
 
 export async function handler({ fecha_desde, fecha_hasta, cliente_id, solo_vencidas, agrupar_por }, client) {
-  const hoyStr = new Date().toISOString().split("T")[0];
+  // Fecha local según el país de la cuenta para evitar desfasaje UTC (BUG-14)
+  const hoyStr = getTodayString(client?.country);
   const finalHasta = fecha_hasta || hoyStr;
   const finalDesde = fecha_desde || subDays(finalHasta, 365); // 12 meses atrás por defecto
   const usoRangoDefault = !fecha_desde;
@@ -44,6 +45,7 @@ export async function handler({ fecha_desde, fecha_hasta, cliente_id, solo_venci
   const comprobantesConSaldo = [];
   let paginasRestantes = 20; // Tope compartido de 20 páginas
   let truncado = false;
+  let cotizacionesExcluidas = 0;
 
   const antiguedadGeneral = {
     no_vencida: 0,
@@ -70,6 +72,15 @@ export async function handler({ fecha_desde, fecha_hasta, cliente_id, solo_venci
     if (res.truncado) truncado = true;
 
     for (const c of res.items) {
+      const tipoRaw = c.TipoFc || c.tipoFc || "";
+      const fiscal = classifyFiscalInvoice(tipoRaw);
+
+      // Excluir cotizaciones y tipos no fiscales de la deuda (BUG-11)
+      if (!fiscal.esFiscal) {
+        cotizacionesExcluidas += 1;
+        continue;
+      }
+
       const saldo = parseAmount(c.Saldo ?? c.saldo ?? 0);
       if (saldo > 0) {
         const fVto = c.FechaVencimiento ? c.FechaVencimiento.slice(0, 10) : c.FechaEmision?.slice(0, 10) || null;
@@ -89,14 +100,19 @@ export async function handler({ fecha_desde, fecha_hasta, cliente_id, solo_venci
           continue;
         }
 
+        // Sanitización de cliente (BUG-13)
+        let clienteRaw = String(c.RazonSocial || c.razonSocial || "").trim();
+        let clienteIdentificador = clienteRaw.length > 0 && clienteRaw !== "0" && clienteRaw !== "-1" ? clienteRaw : "Consumidor Final";
+
         const tramoVenc = clasificarTramo(esVencida, diasVencido);
         antiguedadGeneral[tramoVenc] += saldo;
 
         comprobantesConSaldo.push({
           id: c.Id ?? c.id,
           cliente_id: c.IdCliente ?? c.idCliente,
-          cliente: c.RazonSocial || c.razonSocial || "Consumidor Final",
+          cliente: clienteIdentificador,
           numero: c.Numero || c.numero || "Sin número",
+          tipo: fiscal.tipoNormalizado,
           fecha_emision: (c.FechaEmision || c.fechaEmision || "").slice(0, 10),
           fecha_vencimiento: fVto,
           saldo,
@@ -120,6 +136,7 @@ export async function handler({ fecha_desde, fecha_hasta, cliente_id, solo_venci
         return {
           numero: c.numero,
           cliente: c.cliente,
+          tipo: c.tipo,
           fecha_emision: c.fecha_emision,
           fecha_vencimiento: c.fecha_vencimiento,
           saldo: c.saldo,
@@ -185,18 +202,33 @@ export async function handler({ fecha_desde, fecha_hasta, cliente_id, solo_venci
   const saldoNoVencidoGeneral = Math.max(0, saldoTotalGeneral - saldoVencidoGeneral);
 
   const advertencias = [
+    // Siempre responder que se excluyen cotizaciones (Requerimiento explícito del usuario)
+    "Se excluyen cotizaciones y comprobantes no fiscales del cálculo de saldo deudor.",
     "Saldo calculado desde comprobantes con saldo pendiente. No incluye pagos a cuenta ni ajustes de cuenta corriente, puede diferir del reporte Saldo de clientes.",
   ];
+
+  if (cotizacionesExcluidas > 0) {
+    advertencias.push(`Se detectaron y omitieron ${cotizacionesExcluidas} cotizaciones o comprobantes no fiscales con saldo pendiente.`);
+  }
+
   if (usoRangoDefault) {
     advertencias.push(
       `Se utilizó el rango por defecto de los últimos 12 meses (${finalDesde} al ${finalHasta}). Deuda anterior a 12 meses no está incluida; para consultarla especifique 'fecha_desde'.`
     );
   }
+
   if (truncado) {
-    advertencias.push("Búsqueda limitada por tope de 20 páginas entre tramos. Se sugiere acotar el rango de fechas para mayor exactitud.");
+    advertencias.push(
+      "Búsqueda limitada por tope de 20 páginas de la API: la deuda más antigua (mayor a 90 días) podría no haber sido leída en su totalidad debido al corte de paginación."
+    );
   }
 
-  const resumen = `Deuda total encontrada: ${formatCurrency(saldoTotalGeneral)} (Vencida: ${formatCurrency(
+  let prefijoTruncado = "";
+  if (truncado) {
+    prefijoTruncado = "[DATOS PARCIALES / TRUNCADOS] Búsqueda cortada por límite de 20 páginas. ";
+  }
+
+  const resumen = `${prefijoTruncado}Deuda total encontrada: ${formatCurrency(saldoTotalGeneral)} (Vencida: ${formatCurrency(
     saldoVencidoGeneral
   )}, A vencer: ${formatCurrency(saldoNoVencidoGeneral)}) en ${comprobantesConSaldo.length} comprobante(s) pendiente(s) (período analizado: ${finalDesde} al ${finalHasta}).`;
 
@@ -212,6 +244,7 @@ export async function handler({ fecha_desde, fecha_hasta, cliente_id, solo_venci
           hasta: finalHasta,
           es_rango_por_defecto: usoRangoDefault,
         },
+        antiguedad_deuda_incompleta: truncado, // Alerta explícita para dashboards (BUG-12)
         antiguedad_deuda_general: {
           no_vencida: Math.round(antiguedadGeneral.no_vencida * 100) / 100,
           vencida_1_30: Math.round(antiguedadGeneral.vencida_1_30 * 100) / 100,

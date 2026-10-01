@@ -5,8 +5,10 @@ import * as stockPorDeposito from "../src/tools/stock_por_deposito.js";
 import * as cuentasPorCobrar from "../src/tools/cuentas_por_cobrar.js";
 import * as buscarProductos from "../src/tools/buscar_productos.js";
 import { registerContabiliumTools } from "../src/register-tools.js";
+import { classifyFiscalInvoice, getTodayString } from "../src/utils.js";
+import { SYSTEM_INSTRUCTION } from "../src/instructions.js";
 
-describe("Fase 1 — Verificación Automatizada de Tickets", () => {
+describe("Fase 1 y 1.1 — Verificación Automatizada de Tickets", () => {
 
   describe("resumen_ventas (BUG-01, BUG-05, MEJ-01, MEJ-04)", () => {
     it("resta correctamente notas de crédito y separa facturado bruto vs neto", async () => {
@@ -102,6 +104,209 @@ describe("Fase 1 — Verificación Automatizada de Tickets", () => {
     });
   });
 
+  describe("Sanitización Fiscal y Exclusión de Cotizaciones (BUG-11)", () => {
+    it("clasificador classifyFiscalInvoice discrimina correctamente comprobantes fiscales de cotizaciones y basura", () => {
+      // Válidos Venta
+      assert.equal(classifyFiscalInvoice("FCA").esFiscal, true);
+      assert.equal(classifyFiscalInvoice("FCB").esVenta, true);
+      assert.equal(classifyFiscalInvoice("NDA").esVenta, true);
+      assert.equal(classifyFiscalInvoice("FACTURA A").esVenta, true);
+
+      // Válidos Crédito
+      assert.equal(classifyFiscalInvoice("NCA").esNC, true);
+      assert.equal(classifyFiscalInvoice("NCB").esNC, true);
+      assert.equal(classifyFiscalInvoice("NCC").esNC, true);
+
+      // Exclusiones explícitas (Cotizaciones y comprobantes no fiscales)
+      assert.equal(classifyFiscalInvoice("COT").esFiscal, false);
+      assert.equal(classifyFiscalInvoice("NCT").esFiscal, false);
+      assert.equal(classifyFiscalInvoice("PRE").esFiscal, false);
+      assert.equal(classifyFiscalInvoice("REMITO").esFiscal, false);
+      assert.equal(classifyFiscalInvoice("-1").esFiscal, false);
+      assert.equal(classifyFiscalInvoice("0").esFiscal, false);
+      assert.equal(classifyFiscalInvoice("XXX").esFiscal, false);
+      assert.equal(classifyFiscalInvoice("FAKE").esFiscal, false);
+    });
+
+    it("resumen_ventas excluye cotizaciones (COT, NCT) y tipos inválidos alcanzando los totales fiscales esperados", async () => {
+      // Reproducción exacta del lote del 1/7/2026:
+      // 12 facturas reales de $1.210 = $14.520
+      // 5 NC reales de $1.210 = $6.050
+      // 30 cotizaciones de $450
+      // 3 cotizaciones de $497,25
+      // 12 comprobantes de tipo -1, 0, XXX, FAKE de $450
+      // 3 NCT (nota de crédito de cotización)
+      const mockItems = [
+        ...Array.from({ length: 12 }, (_, i) => ({
+          Id: i + 1,
+          TipoFc: "FCA",
+          Total: 1210.00,
+          RazonSocial: `Cliente ${i + 1}`,
+          IdCliente: i + 1,
+        })),
+        ...Array.from({ length: 5 }, (_, i) => ({
+          Id: 20 + i,
+          TipoFc: "NCA",
+          Total: -1210.00,
+          RazonSocial: `Cliente ${i + 1}`,
+          IdCliente: i + 1,
+        })),
+        // Cotizaciones
+        ...Array.from({ length: 30 }, (_, i) => ({
+          Id: 40 + i,
+          TipoFc: "COT",
+          Total: 450.00,
+          RazonSocial: "Consumidor Final",
+        })),
+        ...Array.from({ length: 3 }, (_, i) => ({
+          Id: 80 + i,
+          TipoFc: "COT",
+          Total: 497.25,
+          RazonSocial: "Consumidor Final",
+        })),
+        // NCT
+        ...Array.from({ length: 3 }, (_, i) => ({
+          Id: 90 + i,
+          TipoFc: "NCT",
+          Total: -450.00,
+          RazonSocial: "Consumidor Final",
+        })),
+        // Basura / inválidos
+        { Id: 100, TipoFc: "-1", Total: 450.00 },
+        { Id: 101, TipoFc: "0", Total: 450.00 },
+        { Id: 102, TipoFc: "XXX", Total: 450.00 },
+        { Id: 103, TipoFc: "FAKE", Total: 450.00 },
+      ];
+
+      const mockClient = {
+        paginatedGet: async () => ({
+          items: mockItems,
+          truncado: false,
+          paginasLeidas: 1,
+          totalRegistros: mockItems.length,
+        }),
+      };
+
+      const result = await resumenVentas.handler(
+        { fecha_desde: "2026-07-01", fecha_hasta: "2026-07-01", agrupar_por: "mes" },
+        mockClient
+      );
+
+      const parsed = JSON.parse(result.content[0].text);
+      const totales = parsed.datos.totales_generales;
+
+      assert.equal(totales.total_facturado_bruto, 14520.00, "Debe ser exactamente $ 14.520 bruto");
+      assert.equal(totales.total_notas_credito, 6050.00, "Debe ser exactamente $ 6.050 en NC");
+      assert.equal(totales.total_neto, 8470.00, "Debe ser exactamente $ 8.470 neto");
+      assert.equal(totales.cantidad_facturas, 12, "Debe haber 12 facturas");
+      assert.equal(totales.cantidad_notas_credito, 5, "Debe haber 5 NC");
+      assert.ok(totales.cotizaciones_excluidas >= 40, "Debe reportar más de 40 comprobantes excluidos");
+
+      // Verificación de requerimiento: siempre advertir que se excluyen cotizaciones
+      assert.ok(parsed.advertencias.some(a => a.includes("Se excluyen cotizaciones")));
+    });
+  });
+
+  describe("Cálculos sobre datos truncados (BUG-12)", () => {
+    it("resumen_ventas anula variaciones porcentuales si la consulta fue truncada por límite de páginas", async () => {
+      const mockClient = {
+        paginatedGet: async () => ({
+          items: [{ Id: 1, TipoFc: "FCA", Total: 50000, FechaEmision: "2026-07-15" }],
+          truncado: true, // Simula corte a las 20 páginas
+          paginasLeidas: 20,
+          totalRegistros: 1000,
+        }),
+      };
+
+      const result = await resumenVentas.handler(
+        { fecha_desde: "2026-07-01", fecha_hasta: "2026-09-30", agrupar_por: "mes", comparar_con_periodo_anterior: true },
+        mockClient
+      );
+
+      const parsed = JSON.parse(result.content[0].text);
+      assert.equal(parsed.truncado, true);
+      assert.equal(parsed.datos.totales_generales.variacion_total_pct, null, "No debe calcular variación sobre datos truncados");
+      assert.equal(parsed.datos.filas[0].variacion_pct, null, "No debe calcular variación por grupo sobre datos truncados");
+      assert.match(parsed.resumen, /\[DATOS PARCIALES \/ TRUNCADOS\]/, "El resumen debe advertir explícitamente el truncado");
+    });
+  });
+
+  describe("Sanitización de Cliente Vacío (BUG-13)", () => {
+    it("resumen_ventas normaliza clientes vacíos o con solo espacios a Consumidor Final", async () => {
+      const mockItems = [
+        { Id: 1, TipoFc: "FCA", Total: 1000, RazonSocial: "   ", IdCliente: null },
+        { Id: 2, TipoFc: "FCA", Total: 2000, RazonSocial: "Acme Corp", IdCliente: 50 },
+      ];
+
+      const mockClient = {
+        paginatedGet: async () => ({ items: mockItems, truncado: false, paginasLeidas: 1, totalRegistros: 2 }),
+      };
+
+      const result = await resumenVentas.handler(
+        { fecha_desde: "2026-07-01", fecha_hasta: "2026-07-01", agrupar_por: "cliente" },
+        mockClient
+      );
+
+      const parsed = JSON.parse(result.content[0].text);
+      const filas = parsed.datos.filas;
+
+      assert.ok(!filas.some(f => f.grupo.trim() === ""), "No debe existir un grupo con espacios vacíos");
+      assert.ok(filas.some(f => f.grupo === "Consumidor Final"), "Debe agrupar bajo Consumidor Final");
+      assert.equal(parsed.datos.totales_generales.clientes_unicos, 1, "Solo Acme Corp cuenta como cliente único comercial");
+    });
+  });
+
+  describe("Zona Horaria Local para Fechas por Defecto (BUG-14)", () => {
+    it("getTodayString respeta la zona horaria del país evitando desfasaje UTC", () => {
+      const todayAr = getTodayString("AR");
+      assert.match(todayAr, /^\d{4}-\d{2}-\d{2}$/);
+    });
+  });
+
+  describe("Blindaje de Tools de Facturación en Producción (BUG-15)", () => {
+    it("oculta tools de facturación por defecto y registra solo las 10 tools de lectura/diagnóstico", () => {
+      delete process.env.ENABLE_BILLING_TOOLS;
+
+      const registeredTools = new Map();
+      const mockServer = {
+        tool: (name, desc, schema, handler) => {
+          registeredTools.set(name, handler);
+        },
+      };
+
+      registerContabiliumTools(mockServer, { isParallel: false });
+
+      // Verificación: No están las 4 de facturación
+      assert.equal(registeredTools.has("crear_borrador_factura"), false);
+      assert.equal(registeredTools.has("autorizar_factura_electronica"), false);
+      assert.equal(registeredTools.has("emitir_factura_express"), false);
+      assert.equal(registeredTools.has("obtener_factura_pdf"), false);
+
+      // Verificación: Sí están las 10 de lectura y diagnóstico
+      const expectedTools = [
+        "buscar_clientes",
+        "buscar_productos",
+        "buscar_proveedores",
+        "listar_depositos",
+        "listar_ventas",
+        "resumen_ventas",
+        "stock_por_deposito",
+        "cuentas_por_cobrar",
+        "registrar_consulta_no_soportada",
+        "contabilium_auth_status",
+      ];
+
+      for (const t of expectedTools) {
+        assert.equal(registeredTools.has(t), true, `La tool ${t} debe estar registrada`);
+      }
+      assert.equal(registeredTools.size, 10, "Deben quedar exactamente 10 tools registradas en el MVP");
+    });
+
+    it("SYSTEM_INSTRUCTION instruye rechazar facturación indicando que no está habilitado actualmente", () => {
+      assert.match(SYSTEM_INSTRUCTION, /actualmente no se está habilitado para esto/i);
+    });
+  });
+
   describe("stock_por_deposito (BUG-06, BUG-07, MEJ-07)", () => {
     it("no emite falsa sobreventa con stock negativo sin reservas (BUG-06)", async () => {
       const mockClient = {
@@ -160,7 +365,7 @@ describe("Fase 1 — Verificación Automatizada de Tickets", () => {
     it("aplica top y orden informando el total de registros en el resumen (BUG-07 y MEJ-07)", async () => {
       const mockItems = Array.from({ length: 50 }, (_, i) => ({
         Codigo: `SKU-${String(i + 1).padStart(3, "0")}`,
-        StockActual: i - 25, // algunos negativos, otros positivos
+        StockActual: i - 25,
         StockReservado: 0,
       }));
 
@@ -186,10 +391,36 @@ describe("Fase 1 — Verificación Automatizada de Tickets", () => {
       assert.match(parsed.resumen, /mostrando los 5 principales/, "El resumen debe aclarar cuántos muestra");
       assert.equal(parsed.truncado, true, "Debe marcar truncado: true cuando hay más registros que el top");
     });
+
+    it("diferencia claramente en el resumen cuando se alcanza el tope de páginas de la API (BUG-07 refinado)", async () => {
+      const mockItems = Array.from({ length: 500 }, (_, i) => ({
+        Codigo: `SKU-${i}`,
+        StockActual: i,
+        StockReservado: 0,
+      }));
+
+      const mockClient = {
+        get: async () => [{ Id: 3363, Nombre: "A - PRINCIPAL", Activo: true }],
+        paginatedGet: async () => ({
+          items: mockItems,
+          truncado: true, // Simula corte a las 10 páginas de la API
+          paginasLeidas: 10,
+          totalRegistros: 500,
+        }),
+      };
+
+      const result = await stockPorDeposito.handler(
+        { deposito_id: 3363, filtro: "todos", top: 10, orden: "menor_disponible" },
+        mockClient
+      );
+
+      const parsed = JSON.parse(result.content[0].text);
+      assert.match(parsed.resumen, /tope máximo de 10 páginas de la API alcanzado; existen más registros/i);
+    });
   });
 
-  describe("cuentas_por_cobrar (BUG-08, MEJ-05)", () => {
-    it("explicita el rango de fechas analizado y calcula antigüedad de deuda (Aging Report)", async () => {
+  describe("cuentas_por_cobrar (BUG-08, MEJ-05, BUG-11, BUG-12)", () => {
+    it("explicita el rango de fechas analizado, excluye cotizaciones y calcula antigüedad de deuda", async () => {
       const hoy = new Date();
       const hace15Dias = new Date(hoy.getTime() - 15 * 86400000).toISOString().split("T")[0];
       const hace45Dias = new Date(hoy.getTime() - 45 * 86400000).toISOString().split("T")[0];
@@ -198,15 +429,18 @@ describe("Fase 1 — Verificación Automatizada de Tickets", () => {
       const en10Dias = new Date(hoy.getTime() + 10 * 86400000).toISOString().split("T")[0];
 
       const mockItems = [
-        { Id: 1, Numero: "A-0001", Saldo: 1000, FechaVencimiento: en10Dias, RazonSocial: "Cliente Alfa", IdCliente: 10 },
-        { Id: 2, Numero: "A-0002", Saldo: 2000, FechaVencimiento: hace15Dias, RazonSocial: "Cliente Alfa", IdCliente: 10 },
-        { Id: 3, Numero: "A-0003", Saldo: 3000, FechaVencimiento: hace45Dias, RazonSocial: "Cliente Beta", IdCliente: 20 },
-        { Id: 4, Numero: "A-0004", Saldo: 4000, FechaVencimiento: hace75Dias, RazonSocial: "Cliente Beta", IdCliente: 20 },
-        { Id: 5, Numero: "A-0005", Saldo: 5000, FechaVencimiento: hace120Dias, RazonSocial: "Cliente Gamma", IdCliente: 30 },
+        { Id: 1, TipoFc: "FCA", Numero: "A-0001", Saldo: 1000, FechaVencimiento: en10Dias, RazonSocial: "Cliente Alfa", IdCliente: 10 },
+        { Id: 2, TipoFc: "FCB", Numero: "A-0002", Saldo: 2000, FechaVencimiento: hace15Dias, RazonSocial: "Cliente Alfa", IdCliente: 10 },
+        { Id: 3, TipoFc: "FCA", Numero: "A-0003", Saldo: 3000, FechaVencimiento: hace45Dias, RazonSocial: "Cliente Beta", IdCliente: 20 },
+        { Id: 4, TipoFc: "FCB", Numero: "A-0004", Saldo: 4000, FechaVencimiento: hace75Dias, RazonSocial: "Cliente Beta", IdCliente: 20 },
+        { Id: 5, TipoFc: "FCA", Numero: "A-0005", Saldo: 5000, FechaVencimiento: hace120Dias, RazonSocial: "Cliente Gamma", IdCliente: 30 },
+        // Cotizaciones con saldo pendiente que deben ser excluidas (BUG-11)
+        { Id: 6, TipoFc: "COT", Numero: "COT-01", Saldo: 50000, FechaVencimiento: hace15Dias, RazonSocial: "   " },
       ];
 
       let calls = 0;
       const mockClient = {
+        country: "AR",
         paginatedGet: async () => {
           calls++;
           return {
@@ -230,9 +464,10 @@ describe("Fase 1 — Verificación Automatizada de Tickets", () => {
       assert.ok(totales.periodo_analizado.es_rango_por_defecto, "Debe marcar que usó rango por defecto");
       assert.match(parsed.resumen, /período analizado:/, "El resumen debe incluir las fechas analizadas");
       assert.ok(parsed.advertencias.some(a => a.includes("últimos 12 meses")), "Debe advertir sobre los últimos 12 meses");
+      assert.ok(parsed.advertencias.some(a => a.includes("Se excluyen cotizaciones")), "Debe advertir que excluye cotizaciones");
 
-      // Verificación MEJ-05 (Aging)
-      assert.equal(totales.saldo_total, 15000, "Saldo total debe ser 15.000");
+      // Verificación MEJ-05 (Aging) y BUG-11 (excluyó la COT de 50.000)
+      assert.equal(totales.saldo_total, 15000, "Saldo total debe ser 15.000 (sin los 50.000 de COT)");
       assert.equal(totales.saldo_vencido, 14000, "Saldo vencido debe ser 14.000");
       assert.equal(totales.saldo_no_vencido, 1000, "Saldo corriente a vencer es 1.000");
 
@@ -287,7 +522,6 @@ describe("Fase 1 — Verificación Automatizada de Tickets", () => {
         tokenExpiresAt: 0,
         get: async (endpoint) => {
           if (endpoint === "/usuarios/obtenerinfo") {
-            // Simulamos que al hacer get se obtiene el token
             mockClient.cachedToken = "fake-jwt-token";
             mockClient.tokenExpiresAt = Date.now() + 3600 * 1000;
             return {

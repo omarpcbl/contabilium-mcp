@@ -132,19 +132,20 @@ export async function handler({ deposito_id, codigo_producto, filtro, umbral, to
     advertencias.push("Se detectaron existencias físicas negativas sin reservas activas registradas (posible desajuste de inventario).");
   }
   if (truncadoApi) {
-    advertencias.push("Consulta limitada por tope de 10 páginas de inventario de la API. Se sugiere filtrar por depósito específico o SKU.");
+    advertencias.push("Tope de 10 páginas de la API alcanzado. El total de productos en el depósito es superior a los registros leídos. Se sugiere filtrar por SKU o categoría.");
   }
   if (esTruncadoPorTop) {
-    advertencias.push(`Se muestran ${datos.length} de ${totalEncontrados} productos encontrados. Ajuste el parámetro 'top' si requiere más registros.`);
+    advertencias.push(`Se muestran ${datos.length} de ${totalEncontrados} productos leídos. Ajuste el parámetro 'top' si requiere más registros.`);
   }
 
-  let resumen = `Se encontraron ${totalEncontrados} producto(s) con filtro '${filtro}'`;
-  if (esTruncadoPorTop) {
-    resumen += ` (mostrando los ${datos.length} principales ordenados por ${orden})`;
+  let resumen = "";
+  if (truncadoApi) {
+    resumen = `Se leyeron ${totalEncontrados} productos (tope máximo de 10 páginas de la API alcanzado; existen más registros en el depósito) con filtro '${filtro}' (mostrando los ${datos.length} principales ordenados por ${orden}).`;
+  } else if (esTruncadoPorTop) {
+    resumen = `Se encontraron ${totalEncontrados} producto(s) con filtro '${filtro}' (mostrando los ${datos.length} principales ordenados por ${orden}).`;
   } else {
-    resumen += ` (mostrando ${datos.length})`;
+    resumen = `Se encontraron ${totalEncontrados} producto(s) con filtro '${filtro}' (mostrando ${datos.length}).`;
   }
-  resumen += `.`;
 
   return formatToolResponse({
     datos,
