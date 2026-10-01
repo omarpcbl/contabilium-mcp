@@ -7,6 +7,7 @@ import * as buscarProductos from "../src/tools/buscar_productos.js";
 import * as quePuedoConsultar from "../src/tools/que_puedo_consultar.js";
 import * as registrarConsultaNoSoportada from "../src/tools/registrar_consulta_no_soportada.js";
 import * as diagnosticarOrden from "../src/tools/diagnosticar_orden.js";
+import * as buscarOrdenesVenta from "../src/tools/buscar_ordenes_venta.js";
 import { registerContabiliumTools } from "../src/register-tools.js";
 import { classifyFiscalInvoice, formatIsoWeekLabel, formatYearMonthLabel, getTodayString, renderProgressBar, validateTaxId } from "../src/utils.js";
 import { SYSTEM_INSTRUCTION } from "../src/instructions.js";
@@ -266,7 +267,7 @@ describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
       assert.equal(registeredTools.has("emitir_factura_express"), false);
       assert.equal(registeredTools.has("obtener_factura_pdf"), false);
 
-      // Sí están las 11 de lectura, asistencia y diagnóstico
+      // Sí están las 13 de lectura, asistencia, órdenes y diagnóstico
       const expectedTools = [
         "que_puedo_consultar",
         "buscar_clientes",
@@ -278,6 +279,7 @@ describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
         "stock_por_deposito",
         "cuentas_por_cobrar",
         "diagnosticar_orden",
+        "buscar_ordenes_venta",
         "registrar_consulta_no_soportada",
         "contabilium_auth_status",
       ];
@@ -285,7 +287,7 @@ describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
       for (const t of expectedTools) {
         assert.equal(registeredTools.has(t), true, `La tool ${t} debe estar registrada`);
       }
-      assert.equal(registeredTools.size, 12);
+      assert.equal(registeredTools.size, 13);
     });
 
     it("SYSTEM_INSTRUCTION instruye rechazar facturación indicando que no está habilitado actualmente (MEJ-10)", () => {
@@ -1000,6 +1002,143 @@ describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
       assert.match(c9.titulo, /fuerza condición de Consumidor Final/);
     });
 
+    it("Caso C8: orden facturada asíncronamente tras error 500 / timeout en emisión previa", async () => {
+      const mockClient = {
+        country: "AR",
+        get: async (endpoint) => {
+          if (endpoint === "/ordenesVenta/search") {
+            return {
+              Items: [
+                {
+                  ID: 44744305,
+                  NumeroOrden: "ORD-500-OK",
+                  IDComprobante: 95214075,
+                  Estado: "Finalizada",
+                  IDIntegracion: 27341,
+                  Comprador: "EMPRESA EJEMPLO S.A.",
+                  TipoDocumento: "CUIT",
+                  NroDocumento: "30712345678",
+                  Total: 14500,
+                },
+              ],
+            };
+          }
+          if (endpoint === "/comprobantes/search") return { Items: [] };
+          return null;
+        },
+      };
+
+      const result = await diagnosticarOrden.handler(
+        {
+          referencia_externa: "ORD-500-OK",
+          sintoma: "error_500",
+          error_recibido: "500 Internal Server Error",
+        },
+        mockClient
+      );
+
+      const parsed = JSON.parse(result.content[0].text);
+      assert.equal(parsed.datos.estado, "COMPROBANTE_YA_EMITIDO");
+      assert.equal(parsed.datos.checks.comprobante_previo.encontrado, true);
+      assert.equal(parsed.datos.checks.comprobante_previo.id, 95214075);
+      const c8 = parsed.datos.causas_detectadas.find((c) => c.codigo === "ORDEN_YA_FACTURADA_ASINCRONA_C8");
+      assert.ok(c8, "Debe detectar ORDEN_YA_FACTURADA_ASINCRONA_C8");
+      assert.match(c8.descripcion, /95214075/);
+      assert.match(parsed.resumen, /ya fue emitida previamente en Contabilium/);
+    });
+
+    it("Caso C3: orden con borrador vinculado tras rechazo previo de ARCA", async () => {
+      const mockClient = {
+        country: "AR",
+        get: async (endpoint) => {
+          if (endpoint === "/ordenesVenta/search") {
+            return {
+              Items: [
+                {
+                  ID: 44744306,
+                  NumeroOrden: "ORD-ARCA-DRAFT",
+                  IDComprobante: 88123,
+                  Estado: "Pendiente",
+                  IDIntegracion: 28778,
+                },
+              ],
+            };
+          }
+          if (endpoint === "/comprobantes/search") {
+            return {
+              Items: [
+                {
+                  Id: 88123,
+                  Numero: "Borrador-001",
+                  TipoFc: "Factura B Borrador",
+                  Estado: "Borrador",
+                  Observaciones: "ORD-ARCA-DRAFT",
+                  ErrorAFIP: "CUIT del comprador no registrado en AFIP",
+                },
+              ],
+            };
+          }
+          return null;
+        },
+      };
+
+      const result = await diagnosticarOrden.handler(
+        {
+          referencia_externa: "ORD-ARCA-DRAFT",
+          error_recibido: "La orden de venta es inexistente",
+        },
+        mockClient
+      );
+
+      const parsed = JSON.parse(result.content[0].text);
+      assert.equal(parsed.datos.estado, "BLOQUEANTE_DETECTADO");
+      const c3 = parsed.datos.causas_detectadas.find((c) => c.codigo === "BORRADOR_HUERFANO_ARCA_C3");
+      assert.ok(c3, "Debe detectar BORRADOR_HUERFANO_ARCA_C3");
+      assert.match(c3.descripcion, /88123/);
+      assert.match(c3.accion_recomendada, /Eliminar el borrador/);
+    });
+
+    it("Caso C7: orden cargada en otra integración (25917 vs 28778 enviada)", async () => {
+      const mockClient = {
+        country: "AR",
+        get: async (endpoint) => {
+          if (endpoint === "/ordenesVenta/search") {
+            return {
+              Items: [
+                {
+                  ID: 44744307,
+                  NumeroOrden: "ORD-INT-OTRA",
+                  IDIntegracion: 25917,
+                  IDComprobante: 0,
+                  Estado: "Pendiente",
+                },
+              ],
+            };
+          }
+          if (endpoint === "/comprobantes/search") return { Items: [] };
+          return null;
+        },
+      };
+
+      const result = await diagnosticarOrden.handler(
+        {
+          referencia_externa: "ORD-INT-OTRA",
+          id_integracion_enviado: 28778,
+          error_recibido: "La orden de venta es inexistente",
+        },
+        mockClient
+      );
+
+      const parsed = JSON.parse(result.content[0].text);
+      assert.equal(parsed.datos.estado, "ERROR_CONTRATO_PARTNER");
+      const c7 = parsed.datos.causas_detectadas.find((c) => c.codigo === "ID_INTEGRACION_INCORRECTO_C7");
+      assert.ok(c7, "Debe detectar ID_INTEGRACION_INCORRECTO_C7");
+      assert.match(c7.descripcion, /25917/);
+      assert.match(c7.descripcion, /28778/);
+      assert.match(c7.accion_recomendada, /25917/);
+      assert.ok(parsed.datos.evidencias.integraciones_consultadas.includes(25917));
+    });
+
     it("que_puedo_consultar expone el módulo de diagnóstico de integraciones", async () => {
       const mockClient = {
         ambiente: "Producción",
@@ -1012,6 +1151,128 @@ describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
       assert.equal(parsed.datos.modulos.length, 1);
       assert.equal(parsed.datos.modulos[0].nombre, "Diagnóstico de Órdenes e Integraciones E-Commerce (OP-08)");
       assert.ok(parsed.datos.modulos[0].tools.includes("diagnosticar_orden"));
+    });
+  });
+
+  describe("buscar_ordenes_venta (Mapeo de Integraciones, Facturación y Filtro sin Integración)", () => {
+    it("mapea exhaustivamente IDVentaIntegracion, IDIntegracion, cliente, IDComprobante e ítems", async () => {
+      const mockClient = {
+        get: async (endpoint) => {
+          if (endpoint === "/ordenesVenta/search") {
+            return {
+              TotalItems: 1,
+              TotalPage: 1,
+              Items: [
+                {
+                  ID: 44744305,
+                  IDPersona: 46182871,
+                  IDComprobante: 95214075,
+                  FechaCreacion: "01/10/2026",
+                  Total: "14.500,00",
+                  Comprador: "EMPRESA EJEMPLO S.A.",
+                  NumeroOrden: "FEN-10293",
+                  Estado: "Finalizada",
+                  Integracion: "Fenicio",
+                  IDIntegracion: 27341,
+                  TipoDocumento: "CUIT",
+                  NroDocumento: "30712345678",
+                  Items: [
+                    {
+                      Id: 1,
+                      Codigo: "SKU-001",
+                      Concepto: "PRODUCTO DESTACADO",
+                      Cantidad: 2,
+                      PrecioUnitario: "5.000,00",
+                    },
+                  ],
+                },
+              ],
+            };
+          }
+          return null;
+        },
+      };
+
+      const result = await buscarOrdenesVenta.handler(
+        { fecha_desde: "2026-09-01", fecha_hasta: "2026-10-01" },
+        mockClient
+      );
+
+      const parsed = JSON.parse(result.content[0].text);
+      assert.equal(parsed.datos.ordenes.length, 1);
+      const ord = parsed.datos.ordenes[0];
+
+      assert.equal(ord.id, 44744305);
+      assert.equal(ord.numero_orden, "FEN-10293");
+      assert.equal(ord.id_venta_integracion, "FEN-10293");
+      assert.equal(ord.id_integracion, 27341);
+      assert.equal(ord.id_comprobante, 95214075);
+      assert.equal(ord.facturada, true);
+      assert.equal(ord.estado, "Finalizada");
+
+      // Cliente mapeado
+      assert.ok(ord.cliente);
+      assert.equal(ord.cliente.nombre, "EMPRESA EJEMPLO S.A.");
+      assert.equal(ord.cliente.tipo_documento, "CUIT");
+      assert.equal(ord.cliente.documento, "30712345678");
+
+      // Ítems mapeados
+      assert.equal(ord.items_cantidad, 1);
+      assert.equal(ord.items[0].sku, "SKU-001");
+      assert.equal(ord.items[0].nombre, "PRODUCTO DESTACADO");
+      assert.equal(ord.items[0].cantidad, 2);
+      assert.equal(ord.items[0].precio, 5000);
+
+      // Resumen informa Facturadas 1/1
+      assert.match(parsed.resumen, /Facturadas: 1\/1/);
+    });
+
+    it("no informa 'Facturadas: 0/50' si la respuesta del API carece de campos de facturación", async () => {
+      const mockClient = {
+        get: async () => ({
+          TotalItems: 2,
+          TotalPage: 1,
+          Items: [
+            { ID: 1, NumeroOrden: "ORD-01", Total: 100 },
+            { ID: 2, NumeroOrden: "ORD-02", Total: 200 },
+          ],
+        }),
+      };
+
+      const result = await buscarOrdenesVenta.handler(
+        { fecha_desde: "2026-09-01", fecha_hasta: "2026-10-01" },
+        mockClient
+      );
+
+      const parsed = JSON.parse(result.content[0].text);
+      assert.doesNotMatch(parsed.resumen, /Facturadas: 0\/2/);
+      assert.match(parsed.resumen, /Estado de facturación no disponible en el listado/);
+    });
+
+    it("la búsqueda por referencia funciona sin parámetro id_integracion", async () => {
+      const mockClient = {
+        get: async (endpoint, params) => {
+          assert.equal(params.IDIntegracion, undefined, "No debe forzar IDIntegracion si no se envió");
+          return {
+            TotalItems: 2,
+            TotalPage: 1,
+            Items: [
+              { ID: 1, NumeroOrden: "FEN-10293", IDIntegracion: 25917, Total: 500, Estado: "Pendiente" },
+              { ID: 2, NumeroOrden: "WOO-99999", IDIntegracion: 28778, Total: 800, Estado: "Pendiente" },
+            ],
+          };
+        },
+      };
+
+      const result = await buscarOrdenesVenta.handler(
+        { fecha_desde: "2026-09-01", fecha_hasta: "2026-10-01", filtro: "FEN-10293" },
+        mockClient
+      );
+
+      const parsed = JSON.parse(result.content[0].text);
+      assert.equal(parsed.datos.ordenes.length, 1);
+      assert.equal(parsed.datos.ordenes[0].numero_orden, "FEN-10293");
+      assert.equal(parsed.datos.ordenes[0].id_integracion, 25917);
     });
   });
 
