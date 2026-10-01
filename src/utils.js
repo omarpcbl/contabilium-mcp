@@ -278,3 +278,38 @@ export function formatToolResponse({ datos, resumen, advertencias = [], truncado
     ],
   };
 }
+
+/**
+ * Descubre los IDs de integraciones activas en la cuenta a partir de comprobantes recientes
+ * o del cache en memoria del cliente.
+ */
+export async function getAccountIntegrations(client, fechaDesde, fechaHasta) {
+  const integraciones = new Set();
+
+  if (client?._knownIntegrations && client._knownIntegrations instanceof Set) {
+    for (const id of client._knownIntegrations) {
+      if (id !== undefined && id !== null && !isNaN(Number(id))) integraciones.add(Number(id));
+    }
+  }
+
+  try {
+    const compRes = await client.get("/comprobantes/search", { fechaDesde, fechaHasta, page: 1 }, 60);
+    const items = Array.isArray(compRes) ? compRes : (compRes?.Items || compRes?.items || []);
+    for (const c of items) {
+      const idInt = c.IDIntegracion ?? c.IdIntegracion ?? c.idIntegracion;
+      if (idInt !== undefined && idInt !== null && !isNaN(Number(idInt)) && Number(idInt) > 0) {
+        integraciones.add(Number(idInt));
+      }
+    }
+  } catch {
+    // Continuar con las que tengamos
+  }
+
+  if (client) {
+    if (!client._knownIntegrations) client._knownIntegrations = new Set();
+    for (const id of integraciones) client._knownIntegrations.add(id);
+  }
+
+  return Array.from(integraciones);
+}
+

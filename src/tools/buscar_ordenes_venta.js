@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { diffDays, formatToolResponse, parseAmount, formatCurrency } from "../utils.js";
+import { diffDays, formatToolResponse, parseAmount, formatCurrency, getAccountIntegrations } from "../utils.js";
 
 export const schema = {
   fecha_desde: z
@@ -79,6 +79,31 @@ export async function handler({ fecha_desde, fecha_hasta, filtro, id_integracion
     else if (rawRes.totalPage !== undefined) totalPages = Number(rawRes.totalPage);
   }
 
+  // Si no se pasó id_integracion y la consulta retornó 0 resultados con filtro por referencia,
+  // consultar en las integraciones activas de la cuenta para encontrar la orden
+  if (items.length === 0 && id_integracion === undefined && filtro) {
+    const integraciones = await getAccountIntegrations(client, fecha_desde, fecha_hasta);
+    for (const discoveredId of integraciones) {
+      try {
+        const intRes = await client.get("/ordenesVenta/search", {
+          ...queryParams,
+          IDIntegracion: discoveredId,
+        }, 60);
+        const intItems = Array.isArray(intRes) ? intRes : (Array.isArray(intRes?.Items) ? intRes.Items : (Array.isArray(intRes?.items) ? intRes.items : []));
+        if (intItems.length > 0) {
+          for (const item of intItems) {
+            item._queryIntegracion = discoveredId;
+            items.push(item);
+          }
+          if (intRes?.TotalItems !== undefined) totalItems = (totalItems || 0) + Number(intRes.TotalItems);
+          if (intRes?.TotalPage !== undefined) totalPages = Math.max(totalPages || 1, Number(intRes.TotalPage));
+        }
+      } catch {
+        // Continuar con la siguiente integración
+      }
+    }
+  }
+
   // Normalización exhaustiva de órdenes de venta soportando todas las convenciones de Contabilium
   const ordenesNormalizadas = items.map((o) => {
     const rawTotal = o.Total ?? o.total ?? o.ImporteTotal ?? o.ImporteTotalNeto ?? 0;
@@ -87,8 +112,8 @@ export async function handler({ fecha_desde, fecha_hasta, filtro, id_integracion
     const rawIdVentaInt = o.IDVentaIntegracion || o.IdVentaIntegracion || o.idVentaIntegracion || o.NumeroOrden || o.numeroOrden || o.NroOrden || o.nroOrden || o.RefExterna || o.refExterna || null;
     const numeroOrden = String(o.NumeroOrden || o.numeroOrden || rawIdVentaInt || o.Numero || o.numero || (o.ID || o.Id ? `ID ${o.ID || o.Id}` : ""));
     
-    // Mapeo exhaustivo de IDIntegracion y Canal
-    const rawIdIntegracion = o.IDIntegracion ?? o.IdIntegracion ?? o.idIntegracion;
+    // Mapeo exhaustivo de IDIntegracion y Canal (usando la integración consultada si vino vacía en el objeto)
+    const rawIdIntegracion = o.IDIntegracion ?? o.IdIntegracion ?? o.idIntegracion ?? o._queryIntegracion ?? id_integracion ?? null;
     const idIntVal = (rawIdIntegracion !== undefined && rawIdIntegracion !== null && !isNaN(Number(rawIdIntegracion))) ? Number(rawIdIntegracion) : null;
     const nombreIntegracion = o.Integracion || o.integracion || o.Canal || o.canal || o.Origen || o.origen || null;
     
@@ -144,7 +169,7 @@ export async function handler({ fecha_desde, fecha_hasta, filtro, id_integracion
     };
   });
 
-  // Post-filtrado por referencia / texto si fue provisto (blindaje si el backend no filtra en servidor)
+  // Post-filtrado por referencia / texto si fue provisto
   let ordenesResultado = ordenesNormalizadas;
   if (filtro && String(filtro).trim()) {
     const fLower = String(filtro).trim().toLowerCase();
@@ -157,6 +182,46 @@ export async function handler({ fecha_desde, fecha_hasta, filtro, id_integracion
       const matchComp = o.id_comprobante && String(o.id_comprobante).includes(fLower);
       return matchNum || matchVentaInt || matchId || matchCliNom || matchCliDoc || matchComp;
     });
+  }
+
+  // Hidratación de ítems e IDIntegracion si no vinieron en la respuesta de búsqueda
+  if (ordenesResultado.length <= 5 || filtro) {
+    for (const ord of ordenesResultado) {
+      if ((!ord.items || ord.items.length === 0) && ord.id) {
+        try {
+          const detail = await client.get("/ordenesVenta", { id: ord.id }, 60);
+          const detItems = Array.isArray(detail?.Items) ? detail.Items : (Array.isArray(detail?.items) ? detail.items : []);
+          if (detItems.length > 0) {
+            ord.items = detItems.map((it) => ({
+              id: it.Id ?? it.id ?? 0,
+              sku: String(it.Codigo || it.codigo || it.Sku || it.sku || "").trim(),
+              nombre: String(it.Concepto || it.concepto || it.Descripcion || it.descripcion || it.Nombre || it.nombre || "").trim(),
+              cantidad: Number(it.Cantidad || it.cantidad || 1),
+              precio: parseAmount(it.PrecioUnitario || it.precioUnitario || it.Precio || it.precio || 0),
+              iva: it.Iva ?? it.iva ?? null,
+            }));
+            ord.items_cantidad = ord.items.length;
+          }
+          if (!ord.id_integracion) {
+            const rawDetInt = detail?.IDIntegracion ?? detail?.IdIntegracion ?? detail?.idIntegracion;
+            if (rawDetInt) ord.id_integracion = Number(rawDetInt);
+          }
+        } catch {
+          // Continuar con los datos disponibles
+        }
+      }
+
+      // Si aún falta id_integracion y tiene id_comprobante, consultar comprobante
+      if (!ord.id_integracion && ord.id_comprobante) {
+        try {
+          const compDetail = await client.get("/comprobantes", { id: ord.id_comprobante }, 60);
+          const compInt = compDetail?.IDIntegracion ?? compDetail?.IdIntegracion;
+          if (compInt) ord.id_integracion = Number(compInt);
+        } catch {
+          // Continuar
+        }
+      }
+    }
   }
 
   const cant = ordenesResultado.length;

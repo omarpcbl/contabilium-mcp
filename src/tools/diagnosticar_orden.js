@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { formatToolResponse, parseAmount, getTodayString, validateTaxId } from "../utils.js";
+import { formatToolResponse, parseAmount, getTodayString, validateTaxId, getAccountIntegrations } from "../utils.js";
 
 export const schema = {
   sintoma: z
@@ -90,18 +90,86 @@ export async function handler(args, client) {
     evidencias.integraciones_consultadas.push(Number(id_integracion_enviado));
   }
 
-  // 1.1 Búsqueda en /ordenesVenta/search (sin forzar integración para descubrir C7)
+  // 1.1 Búsqueda en /ordenesVenta/search
+  // Se prueba con y sin integración, y recorriendo todas las integraciones activas de la cuenta si no hay resultados
   try {
-    const ordRes = await client.get("/ordenesVenta/search", { fechaDesde, fechaHasta, filtro: referencia_externa }, 60);
     let ordList = [];
-    if (Array.isArray(ordRes)) ordList = ordRes;
-    else if (ordRes?.Items && Array.isArray(ordRes.Items)) ordList = ordRes.Items;
-    else if (ordRes?.items && Array.isArray(ordRes.items)) ordList = ordRes.items;
+    const searchParamsBase = { fechaDesde, fechaHasta, filtro: referencia_externa };
 
-    // Si también se pasó nro y es distinto de la referencia, buscar también con ese valor
+    // A) Si el partner indicó ID de integración, buscar primero bajo esa integración
+    if (id_integracion_enviado !== undefined && id_integracion_enviado !== null) {
+      try {
+        const resWithInt = await client.get("/ordenesVenta/search", {
+          ...searchParamsBase,
+          IDIntegracion: id_integracion_enviado,
+        }, 60);
+        const itemsWithInt = Array.isArray(resWithInt) ? resWithInt : (resWithInt?.Items || resWithInt?.items || []);
+        for (const it of itemsWithInt) {
+          it._queryIntegracion = Number(id_integracion_enviado);
+          ordList.push(it);
+        }
+      } catch {
+        // Continuar
+      }
+    }
+
+    // B) Buscar también sin forzar IDIntegracion (para órdenes estándar o si la orden está registrada globalmente)
+    try {
+      const ordRes = await client.get("/ordenesVenta/search", searchParamsBase, 60);
+      const itemsGlobal = Array.isArray(ordRes) ? ordRes : (ordRes?.Items || ordRes?.items || []);
+      for (const it of itemsGlobal) {
+        if (!ordList.some((existing) => (existing.ID || existing.Id) === (it.ID || it.Id))) {
+          ordList.push(it);
+        }
+      }
+    } catch {
+      // Continuar
+    }
+
+    // C) Si todavía no hay resultados para la referencia, o si no se especificó integración,
+    // recorrer todas las integraciones activas de la cuenta para encontrar la orden
+    const yaEncontradaRef = ordList.some((o) => {
+      const numOrd = String(o.NumeroOrden || o.numeroOrden || o.IDVentaIntegracion || o.IdVentaIntegracion || o.idVentaIntegracion || o.Numero || o.numero || "").trim().toUpperCase();
+      const idOrd = String(o.ID || o.Id || o.id || "").trim();
+      return numOrd === refUpper || numOrd.includes(refUpper) || idOrd === refUpper;
+    });
+
+    if (!yaEncontradaRef) {
+      try {
+        const integracionesCuenta = await getAccountIntegrations(client, fechaDesde, fechaHasta);
+        for (const discId of integracionesCuenta) {
+          if (id_integracion_enviado !== undefined && id_integracion_enviado !== null && Number(discId) === Number(id_integracion_enviado)) {
+            continue; // Ya consultada en el paso A
+          }
+          try {
+            const discRes = await client.get("/ordenesVenta/search", {
+              ...searchParamsBase,
+              IDIntegracion: discId,
+            }, 60);
+            const discItems = Array.isArray(discRes) ? discRes : (discRes?.Items || discRes?.items || []);
+            for (const it of discItems) {
+              it._queryIntegracion = Number(discId);
+              if (!ordList.some((existing) => (existing.ID || existing.Id) === (it.ID || it.Id))) {
+                ordList.push(it);
+              }
+            }
+          } catch {
+            // Continuar con la siguiente
+          }
+        }
+      } catch {
+        // Continuar
+      }
+    }
+
+    // D) Si también se pasó nro y es distinto de la referencia, buscar también con ese valor
     if (rawNro && rawNro.toLowerCase() !== referencia_externa.toLowerCase()) {
       try {
-        const ordNroRes = await client.get("/ordenesVenta/search", { fechaDesde, fechaHasta, filtro: rawNro }, 60);
+        const nroParams = { fechaDesde, fechaHasta, filtro: rawNro };
+        if (id_integracion_enviado !== undefined && id_integracion_enviado !== null) {
+          nroParams.IDIntegracion = id_integracion_enviado;
+        }
+        const ordNroRes = await client.get("/ordenesVenta/search", nroParams, 60);
         const extraOrd = Array.isArray(ordNroRes) ? ordNroRes : (ordNroRes?.Items || ordNroRes?.items || []);
         for (const item of extraOrd) {
           if (!ordList.some((existing) => (existing.ID || existing.Id) === (item.ID || item.Id))) {
@@ -115,7 +183,7 @@ export async function handler(args, client) {
 
     // Registrar todas las integraciones observadas en la cuenta
     for (const o of ordList) {
-      const rawInt = o.IDIntegracion ?? o.IdIntegracion ?? o.idIntegracion;
+      const rawInt = o.IDIntegracion ?? o.IdIntegracion ?? o.idIntegracion ?? o._queryIntegracion;
       if (rawInt !== undefined && rawInt !== null && !isNaN(Number(rawInt))) {
         evidencias.integraciones_consultadas.push(Number(rawInt));
       }
@@ -130,8 +198,39 @@ export async function handler(args, client) {
 
     if (ordenEncontrada) {
       ordenEncontradaEnBase = true;
-      const rawIdIntOrd = ordenEncontrada.IDIntegracion ?? ordenEncontrada.IdIntegracion ?? ordenEncontrada.idIntegracion;
-      const idIntOrd = (rawIdIntOrd !== undefined && rawIdIntOrd !== null && !isNaN(Number(rawIdIntOrd))) ? Number(rawIdIntOrd) : null;
+      let rawIdIntOrd = ordenEncontrada.IDIntegracion ?? ordenEncontrada.IdIntegracion ?? ordenEncontrada.idIntegracion ?? ordenEncontrada._queryIntegracion ?? id_integracion_enviado ?? null;
+      let idIntOrd = (rawIdIntOrd !== undefined && rawIdIntOrd !== null && !isNaN(Number(rawIdIntOrd))) ? Number(rawIdIntOrd) : null;
+
+      const ordId = ordenEncontrada.ID ?? ordenEncontrada.Id ?? ordenEncontrada.id;
+      if (ordId) {
+        try {
+          const detail = await client.get("/ordenesVenta", { id: ordId }, 60);
+          if (detail) {
+            const detItems = Array.isArray(detail.Items) ? detail.Items : (Array.isArray(detail.items) ? detail.items : []);
+            if (detItems.length > 0 && (!ordenEncontrada.Items || ordenEncontrada.Items.length === 0)) {
+              ordenEncontrada.Items = detItems;
+            }
+            if (!idIntOrd) {
+              const rawDetInt = detail.IDIntegracion ?? detail.IdIntegracion ?? detail.idIntegracion;
+              if (rawDetInt !== undefined && rawDetInt !== null && !isNaN(Number(rawDetInt))) {
+                idIntOrd = Number(rawDetInt);
+              }
+            }
+            if (!ordenEncontrada.Comprador && (detail.Comprador || detail.NombreCliente || detail.RazonSocial)) {
+              ordenEncontrada.Comprador = detail.Comprador || detail.NombreCliente || detail.RazonSocial;
+            }
+            if (!ordenEncontrada.NroDocumento && (detail.NroDocumento || detail.NroDoc || detail.Cuit)) {
+              ordenEncontrada.NroDocumento = detail.NroDocumento || detail.NroDoc || detail.Cuit;
+            }
+            if (!ordenEncontrada.TipoDocumento && detail.TipoDocumento) {
+              ordenEncontrada.TipoDocumento = detail.TipoDocumento;
+            }
+          }
+        } catch {
+          // Continuar con los datos disponibles
+        }
+      }
+
       if (idIntOrd) evidencias.integraciones_consultadas.push(idIntOrd);
 
       // C7: Orden registrada bajo un IDIntegracion distinto al enviado por el partner
@@ -140,9 +239,48 @@ export async function handler(args, client) {
       }
 
       // Lectura de IDComprobante y Estado de la orden
-      const rawIdCompOrd = ordenEncontrada.IDComprobante ?? ordenEncontrada.IdComprobante ?? ordenEncontrada.idComprobante ?? ordenEncontrada.IDFactura;
+      const rawIdCompOrd = ordenEncontrada.IDComprobante ?? ordenEncontrada.IdComprobante ?? ordenEncontrada.idComprobante ?? ordenEncontrada.IDFactura ?? ordenEncontrada.IdFactura;
       const numIdCompOrd = (rawIdCompOrd !== undefined && rawIdCompOrd !== null && !isNaN(Number(rawIdCompOrd))) ? Number(rawIdCompOrd) : 0;
       const estadoOrd = String(ordenEncontrada.Estado || ordenEncontrada.estado || "").trim();
+
+      // Si tiene comprobante vinculado, consultar detalle de comprobante para enriquecer número, total e integración
+      if (numIdCompOrd > 0) {
+        try {
+          const compDetail = await client.get("/comprobantes", { id: numIdCompOrd }, 60);
+          if (compDetail) {
+            if (!idIntOrd && (compDetail.IDIntegracion || compDetail.IdIntegracion)) {
+              idIntOrd = Number(compDetail.IDIntegracion || compDetail.IdIntegracion);
+            }
+            const esBorradorComp = (compDetail.TipoFc || compDetail.tipoFc || "").toUpperCase().includes("BORRADOR") || compDetail.IdEstado === 0 || compDetail.Estado === "Borrador";
+            if (esBorradorComp) {
+              borradorHuerfano = compDetail;
+            } else {
+              comprobanteEmitido = {
+                id: numIdCompOrd,
+                numero: compDetail.Numero || compDetail.numero || `Comprobante ID ${numIdCompOrd}`,
+                tipo: compDetail.TipoFc || compDetail.tipoFc || "Factura",
+                fecha: (compDetail.FechaEmision || compDetail.fechaEmision || ordenEncontrada.FechaCreacion || ordenEncontrada.fechaCreacion || "").slice(0, 10),
+                total: parseAmount(compDetail.ImporteTotalNeto ?? compDetail.Total ?? ordenEncontrada.Total ?? 0),
+                saldo: parseAmount(compDetail.Saldo ?? 0),
+              };
+            }
+          }
+        } catch {
+          // Continuar
+        }
+      }
+
+      const rawOrdItems = Array.isArray(ordenEncontrada.Items) ? ordenEncontrada.Items : (Array.isArray(ordenEncontrada.items) ? ordenEncontrada.items : []);
+      const mappedItems = rawOrdItems.map((it) => ({
+        id: it.Id ?? it.id ?? 0,
+        sku: String(it.Codigo || it.codigo || it.Sku || it.sku || "").trim(),
+        nombre: String(it.Concepto || it.concepto || it.Descripcion || it.descripcion || it.Nombre || it.nombre || "").trim(),
+        cantidad: Number(it.Cantidad || it.cantidad || 1),
+        precio_unitario: parseAmount(it.PrecioUnitario || it.precioUnitario || it.Precio || it.precio || 0),
+      }));
+
+      const esEstadoBorrador = estadoOrd.toLowerCase().includes("borrador");
+      const esEstadoFacturado = ["finalizada", "facturada", "emitida"].includes(estadoOrd.toLowerCase());
 
       evidencias.orden_encontrada = {
         id: ordenEncontrada.ID || ordenEncontrada.Id,
@@ -150,27 +288,33 @@ export async function handler(args, client) {
         id_integracion: idIntOrd,
         id_comprobante: numIdCompOrd || null,
         estado: estadoOrd || "Pendiente",
+        facturada: Boolean(numIdCompOrd > 0 || esEstadoFacturado),
         comprador: ordenEncontrada.Comprador || ordenEncontrada.NombreCliente || ordenEncontrada.RazonSocial || null,
         documento: ordenEncontrada.NroDocumento || ordenEncontrada.NroDoc || ordenEncontrada.Cuit || null,
+        items_cantidad: mappedItems.length,
+        items: mappedItems,
       };
 
-      const esEstadoBorrador = estadoOrd.toLowerCase().includes("borrador");
       if (esEstadoBorrador) {
-        borradorHuerfano = {
-          id: numIdCompOrd || (ordenEncontrada.ID || ordenEncontrada.Id),
-          tipo: "Borrador",
-          fecha: (ordenEncontrada.FechaCreacion || ordenEncontrada.fechaCreacion || "").slice(0, 10),
-          motivo: ordenEncontrada.Observaciones || "Rechazo previo de ARCA",
-        };
+        if (!borradorHuerfano) {
+          borradorHuerfano = {
+            id: numIdCompOrd || (ordenEncontrada.ID || ordenEncontrada.Id),
+            tipo: "Borrador",
+            fecha: (ordenEncontrada.FechaCreacion || ordenEncontrada.fechaCreacion || "").slice(0, 10),
+            motivo: ordenEncontrada.Observaciones || "Rechazo previo de ARCA",
+          };
+        }
         evidencias.borradores_asociados.push(borradorHuerfano);
-      } else if (numIdCompOrd > 0 || ["finalizada", "facturada", "emitida"].includes(estadoOrd.toLowerCase())) {
-        comprobanteEmitido = {
-          id: numIdCompOrd || (ordenEncontrada.ID || ordenEncontrada.Id),
-          numero: ordenEncontrada.Numero || `Comprobante ID ${numIdCompOrd}`,
-          tipo: "Factura",
-          fecha: (ordenEncontrada.FechaCreacion || ordenEncontrada.fechaCreacion || "").slice(0, 10),
-          total: parseAmount(ordenEncontrada.Total || ordenEncontrada.total || 0),
-        };
+      } else if (numIdCompOrd > 0 || esEstadoFacturado) {
+        if (!comprobanteEmitido) {
+          comprobanteEmitido = {
+            id: numIdCompOrd || (ordenEncontrada.ID || ordenEncontrada.Id),
+            numero: ordenEncontrada.Numero || `Comprobante ID ${numIdCompOrd || (ordenEncontrada.ID || ordenEncontrada.Id)}`,
+            tipo: "Factura",
+            fecha: (ordenEncontrada.FechaCreacion || ordenEncontrada.fechaCreacion || "").slice(0, 10),
+            total: parseAmount(ordenEncontrada.Total || ordenEncontrada.total || 0),
+          };
+        }
         evidencias.comprobantes_relacionados.push(comprobanteEmitido);
       }
     }
@@ -297,15 +441,18 @@ export async function handler(args, client) {
     const sintomaText = String(sintoma || "").toLowerCase();
     const esCaso500oTimeout = errText.includes("500") || errText.includes("timeout") || errText.includes("504") || sintomaText.includes("500") || sintomaText.includes("timeout");
 
+    const compId = comprobanteEmitido.Id || comprobanteEmitido.id;
+    const compNum = comprobanteEmitido.Numero || comprobanteEmitido.numero || (compId ? `ID ${compId}` : "");
+
     erroresBloqueantes.push({
       tipo: "COMPROBANTE_PREVIO_EMITIDO",
-      codigo: esCaso500oTimeout ? "ORDEN_YA_FACTURADA_ASINCRONA_C8" : "COMPROBANTE_YA_EMITIDO_PREVIO",
+      codigo: esCaso500oTimeout ? "ORDEN_YA_FACTURADA_ASINCRONA_C8" : "ORDEN_YA_FACTURADA_C8",
       titulo: esCaso500oTimeout
         ? `Orden facturada asíncronamente en backend tras timeout o error 500 (Causa C8)`
-        : `La orden ya fue emitida previamente en Contabilium`,
+        : `La orden ya está facturada en Contabilium (Comprobante ID ${compId || compNum}) (Causa C8)`,
       responsabilidad: "PARTNER_REINTENTO_ASINCRONO",
-      descripcion: `La orden '${referencia_externa}' ya posee un comprobante fiscal emitido (ID ${comprobanteEmitido.Id || comprobanteEmitido.id}, ${comprobanteEmitido.Numero || comprobanteEmitido.numero || ''}). ${esCaso500oTimeout ? "Si el partner recibió un error 500 o timeout 504 al llamar a emitirFE, la orden se autorizó en ARCA y se guardó de forma diferida. " : ""}Reintentar la llamada a emitirFE provocará rechazo o doble facturación.`,
-      accion_recomendada: `No reintentar la emisión. La orden se encuentra emitida bajo el comprobante #${comprobanteEmitido.Numero || comprobanteEmitido.numero || comprobanteEmitido.id}.`,
+      descripcion: `La orden '${referencia_externa}' ya posee un comprobante fiscal emitido (${compId ? `ID ${compId}` : ''}${compNum && compNum !== `ID ${compId}` ? `, ${compNum}` : ''}). ${esCaso500oTimeout ? "Si el partner recibió un error 500 o timeout 504 al llamar a emitirFE, la orden se autorizó en ARCA y se guardó de forma diferida. " : ""}Reintentar la llamada a emitirFE provocará rechazo o doble facturación.`,
+      accion_recomendada: `No reintentar la emisión. La orden se encuentra emitida bajo el comprobante #${compNum || compId}.`,
       severidad: "CRITICA",
     });
   }
@@ -703,8 +850,12 @@ export async function handler(args, client) {
 
   if (comprobanteEmitido && !borradorHuerfano) {
     // Si la orden ya está facturada (C8 o comprobante emitido previo), es un hallazgo concluyente
+    const compId = comprobanteEmitido.Id || comprobanteEmitido.id;
+    const rawNum = comprobanteEmitido.Numero || comprobanteEmitido.numero;
+    const numDisplay = rawNum || (compId ? `ID ${compId}` : "");
+    const compIdent = compId ? `comprobante ${compId}` : (rawNum ? `comprobante ${rawNum}` : "");
     estado = "COMPROBANTE_YA_EMITIDO";
-    resumen = `La orden ${referencia_externa} ya fue emitida previamente en Contabilium (Comprobante ${comprobanteEmitido.tipo || comprobanteEmitido.TipoFc || 'Factura'} #${comprobanteEmitido.numero || comprobanteEmitido.Numero || comprobanteEmitido.id}). No se debe reintentar la emisión.`;
+    resumen = `La orden ${referencia_externa} ya está facturada (${compIdent || numDisplay}) y ya fue emitida previamente en Contabilium (${comprobanteEmitido.tipo || comprobanteEmitido.TipoFc || 'Factura'} #${numDisplay}). No se debe reintentar la emisión.`;
     accionesRecomendadas.push("Verificar en el canal de venta si la orden ya registró el comprobante para evitar doble facturación.");
   } else if (erroresBloqueantes.length > 0) {
     // PRIORIDAD 1: Errores bloqueantes de datos (CUIT inválido, depósito inexistente, SKU inexistente, stock, borrador C3)

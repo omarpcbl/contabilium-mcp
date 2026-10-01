@@ -1139,6 +1139,126 @@ describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
       assert.ok(parsed.datos.evidencias.integraciones_consultadas.includes(25917));
     });
 
+    it("Ronda 8: diagnosticar_orden con integración 28778 encuentra la orden, hidrata ítems y comprobante, y concluye C8 (orden ya facturada)", async () => {
+      const mockClient = {
+        country: "AR",
+        get: async (endpoint, params) => {
+          if (endpoint === "/ordenesVenta/search") {
+            if (params?.IDIntegracion === 28778 && params?.filtro === "39104") {
+              return {
+                Items: [
+                  {
+                    ID: 44744308,
+                    NumeroOrden: "39104",
+                    IDVentaIntegracion: "39104",
+                    Estado: "Finalizada",
+                    IDComprobante: 182765963,
+                    Origen: "Ecommerce",
+                  },
+                ],
+              };
+            }
+            return { Items: [] };
+          }
+          if (endpoint === "/ordenesVenta" && params?.id === 44744308) {
+            return {
+              ID: 44744308,
+              IDIntegracion: 28778,
+              Items: [
+                { Id: 1, Codigo: "HEZ-SKU-1", Concepto: "Calzado Deportivo", Cantidad: 1, PrecioUnitario: 25000 },
+              ],
+            };
+          }
+          if (endpoint === "/comprobantes" && params?.id === 182765963) {
+            return {
+              Id: 182765963,
+              Numero: "B-0001-00018276",
+              TipoFc: "Factura B",
+              Total: 25000,
+              IDIntegracion: 28778,
+            };
+          }
+          if (endpoint === "/comprobantes/search") return { Items: [] };
+          return null;
+        },
+      };
+
+      const result = await diagnosticarOrden.handler(
+        {
+          referencia_externa: "39104",
+          id_integracion_enviado: 28778,
+          fecha_aproximada: "2026-09-30",
+        },
+        mockClient
+      );
+
+      const parsed = JSON.parse(result.content[0].text);
+      assert.equal(parsed.datos.estado, "COMPROBANTE_YA_EMITIDO");
+      assert.match(parsed.resumen, /ya está facturada.*182765963/i);
+      assert.equal(parsed.datos.checks.comprobante_previo.encontrado, true);
+      assert.equal(parsed.datos.checks.comprobante_previo.id, 182765963);
+      assert.equal(parsed.datos.checks.comprobante_previo.numero, "B-0001-00018276");
+
+      // Verificación de orden encontrada hidratada
+      assert.equal(parsed.datos.evidencias.orden_encontrada.id_integracion, 28778);
+      assert.equal(parsed.datos.evidencias.orden_encontrada.items_cantidad, 1);
+      assert.equal(parsed.datos.evidencias.orden_encontrada.items[0].sku, "HEZ-SKU-1");
+
+      // No debe advertir falsamente C7
+      assert.doesNotMatch(parsed.advertencias.join(" "), /Causa C7/);
+    });
+
+    it("Ronda 8: diagnosticar_orden por referencia sin id_integracion busca a través de las integraciones activas de la cuenta", async () => {
+      const mockClient = {
+        country: "AR",
+        get: async (endpoint, params) => {
+          if (endpoint === "/comprobantes/search" && !params?.filtro) {
+            return {
+              Items: [{ Id: 100, IDIntegracion: 28778 }],
+            };
+          }
+          if (endpoint === "/ordenesVenta/search") {
+            if (params?.IDIntegracion === 28778 && params?.filtro === "39104") {
+              return {
+                Items: [
+                  {
+                    ID: 44744309,
+                    NumeroOrden: "39104",
+                    IDVentaIntegracion: "39104",
+                    Estado: "Finalizada",
+                    IDComprobante: 182765964,
+                  },
+                ],
+              };
+            }
+            return { Items: [] };
+          }
+          if (endpoint === "/ordenesVenta" && params?.id === 44744309) {
+            return {
+              ID: 44744309,
+              IDIntegracion: 28778,
+              Items: [{ Codigo: "SKU-AUTO", Concepto: "Auto Item", Cantidad: 2, PrecioUnitario: 1000 }],
+            };
+          }
+          if (endpoint === "/comprobantes/search") return { Items: [] };
+          return null;
+        },
+      };
+
+      const result = await diagnosticarOrden.handler(
+        {
+          referencia_externa: "39104",
+          fecha_aproximada: "2026-09-30",
+        },
+        mockClient
+      );
+
+      const parsed = JSON.parse(result.content[0].text);
+      assert.equal(parsed.datos.estado, "COMPROBANTE_YA_EMITIDO");
+      assert.equal(parsed.datos.evidencias.orden_encontrada.id_integracion, 28778);
+      assert.equal(parsed.datos.evidencias.orden_encontrada.items_cantidad, 1);
+    });
+
     it("que_puedo_consultar expone el módulo de diagnóstico de integraciones", async () => {
       const mockClient = {
         ambiente: "Producción",
@@ -1273,6 +1393,53 @@ describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
       assert.equal(parsed.datos.ordenes.length, 1);
       assert.equal(parsed.datos.ordenes[0].numero_orden, "FEN-10293");
       assert.equal(parsed.datos.ordenes[0].id_integracion, 25917);
+    });
+
+    it("Ronda 8: buscar_ordenes_venta hidrata items e id_integracion desde /ordenesVenta detail", async () => {
+      const mockClient = {
+        get: async (endpoint, params) => {
+          if (endpoint === "/ordenesVenta/search") {
+            return {
+              TotalItems: 1,
+              TotalPage: 1,
+              Items: [
+                {
+                  ID: 44744310,
+                  NumeroOrden: "39104",
+                  IDVentaIntegracion: "39104",
+                  Estado: "Finalizada",
+                  IDComprobante: 182765963,
+                  Origen: "Ecommerce",
+                  Items: [], // Vacío en búsqueda inicial de listado
+                },
+              ],
+            };
+          }
+          if (endpoint === "/ordenesVenta" && params?.id === 44744310) {
+            return {
+              ID: 44744310,
+              IDIntegracion: 28778,
+              Items: [
+                { Id: 99, Codigo: "HEZ-DET-1", Concepto: "Item Detallado", Cantidad: 3, PrecioUnitario: 1500 },
+              ],
+            };
+          }
+          return null;
+        },
+      };
+
+      const result = await buscarOrdenesVenta.handler(
+        { fecha_desde: "2026-09-01", fecha_hasta: "2026-10-01", id_integracion: 28778, filtro: "39104" },
+        mockClient
+      );
+
+      const parsed = JSON.parse(result.content[0].text);
+      assert.equal(parsed.datos.ordenes.length, 1);
+      const ord = parsed.datos.ordenes[0];
+      assert.equal(ord.id_integracion, 28778);
+      assert.equal(ord.items_cantidad, 1);
+      assert.equal(ord.items[0].sku, "HEZ-DET-1");
+      assert.equal(ord.items[0].nombre, "Item Detallado");
     });
   });
 
