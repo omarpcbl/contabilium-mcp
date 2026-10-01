@@ -1519,7 +1519,7 @@ function renderMainPortalHtml() {
         <label class="field-label" for="country">País</label>
         <div class="input-container">
           <select id="country" aria-label="Selecciona tu país">
-            <option value="AR">🇦🇷 Argentina (api.contabilium.com)</option>
+            <option value="AR">🇦🇷 Argentina</option>
             <option value="CL">🇨🇱 Chile</option>
             <option value="UY">🇺🇾 Uruguay</option>
           </select>
