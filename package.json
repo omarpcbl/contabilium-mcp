@@ -9,7 +9,8 @@
   },
   "scripts": {
     "start": "node server.js",
-    "stdio": "node index.js"
+    "stdio": "node index.js",
+    "test": "node --test tests/*.test.js"
   },
   "keywords": [
     "contabilium",

@@ -6,9 +6,11 @@ export const schema = {
   codigo_producto: z.string().optional().describe("Código SKU específico para filtrar (opcional)."),
   filtro: z.enum(["todos", "sin_stock", "bajo_umbral"]).default("todos").describe("Filtro de existencias: todos, sin_stock (<= 0), o bajo_umbral."),
   umbral: z.number().int().optional().describe("Valor umbral de existencias disponibles (requerido si filtro = bajo_umbral)."),
+  top: z.number().int().min(1).max(200).default(20).describe("Cantidad máxima de productos a devolver (por defecto 20)."),
+  orden: z.enum(["menor_disponible", "mayor_disponible", "alfabetico"]).default("menor_disponible").describe("Criterio de ordenamiento de los productos."),
 };
 
-export async function handler({ deposito_id, codigo_producto, filtro, umbral }, client) {
+export async function handler({ deposito_id, codigo_producto, filtro, umbral, top = 20, orden = "menor_disponible" }, client) {
   if (filtro === "bajo_umbral" && (umbral === undefined || umbral === null)) {
     throw new Error("El parámetro 'umbral' es obligatorio cuando el filtro es 'bajo_umbral'.");
   }
@@ -32,7 +34,8 @@ export async function handler({ deposito_id, codigo_producto, filtro, umbral }, 
 
   const todasLasFilas = [];
   let huboSobreventa = false;
-  let truncado = false;
+  let huboStockNegativoSinReserva = false;
+  let truncadoApi = false;
 
   // Si se busca un solo producto por código SKU puntual
   if (codigo_producto && targetDepositos.length > 1) {
@@ -42,7 +45,12 @@ export async function handler({ deposito_id, codigo_producto, filtro, umbral }, 
         const actual = parseAmount(skuData.StockActual ?? 0);
         const reservado = parseAmount(skuData.StockReservado ?? 0);
         const disponible = actual - reservado;
-        if (disponible < 0) huboSobreventa = true;
+
+        if (reservado > 0 && actual < reservado) {
+          huboSobreventa = true;
+        } else if (actual < 0 && reservado <= 0) {
+          huboStockNegativoSinReserva = true;
+        }
 
         todasLasFilas.push({
           codigo: skuData.Codigo || codigo_producto,
@@ -63,7 +71,7 @@ export async function handler({ deposito_id, codigo_producto, filtro, umbral }, 
       const depNombre = depositosMap.get(depId) || `Depósito ${depId}`;
       const res = await client.paginatedGet("/inventarios/getStockByDeposito", { id: depId }, 10, 300);
 
-      if (res.truncado) truncado = true;
+      if (res.truncado) truncadoApi = true;
 
       for (const item of res.items) {
         const codigo = item.Codigo || item.codigo || "";
@@ -73,11 +81,12 @@ export async function handler({ deposito_id, codigo_producto, filtro, umbral }, 
 
         const stockActual = parseAmount(item.StockActual ?? item.stockActual ?? 0);
         const stockReservado = parseAmount(item.StockReservado ?? item.stockReservado ?? 0);
-        // Regla: disponible = stock_actual - stock_reservado (no usar StockConReservas que se trunca a 0)
         const disponible = stockActual - stockReservado;
 
-        if (disponible < 0) {
+        if (stockReservado > 0 && stockActual < stockReservado) {
           huboSobreventa = true;
+        } else if (stockActual < 0 && stockReservado <= 0) {
+          huboStockNegativoSinReserva = true;
         }
 
         let cumpleFiltro = true;
@@ -101,18 +110,44 @@ export async function handler({ deposito_id, codigo_producto, filtro, umbral }, 
     }
   }
 
+  // Ordenamiento según parámetro 'orden' (MEJ-07)
+  if (orden === "menor_disponible") {
+    todasLasFilas.sort((a, b) => a.disponible - b.disponible);
+  } else if (orden === "mayor_disponible") {
+    todasLasFilas.sort((a, b) => b.disponible - a.disponible);
+  } else if (orden === "alfabetico") {
+    todasLasFilas.sort((a, b) => (a.producto || a.codigo || "").localeCompare(b.producto || b.codigo || ""));
+  }
+
+  const totalEncontrados = todasLasFilas.length;
+  const datos = todasLasFilas.slice(0, top);
+  const esTruncadoPorTop = totalEncontrados > top;
+  const truncado = truncadoApi || esTruncadoPorTop;
+
   const advertencias = [];
   if (huboSobreventa) {
-    advertencias.push("Se detectó sobreventa (disponible negativo) en uno o más productos. El stock físico es menor que las reservas activas.");
+    advertencias.push("Se detectó sobreventa: el stock físico es menor que las reservas activas comprometidas.");
   }
-  if (truncado) {
-    advertencias.push("Consulta limitada por tope de páginas de inventario. Se sugiere filtrar por depósito específico o SKU.");
+  if (huboStockNegativoSinReserva) {
+    advertencias.push("Se detectaron existencias físicas negativas sin reservas activas registradas (posible desajuste de inventario).");
+  }
+  if (truncadoApi) {
+    advertencias.push("Consulta limitada por tope de 10 páginas de inventario de la API. Se sugiere filtrar por depósito específico o SKU.");
+  }
+  if (esTruncadoPorTop) {
+    advertencias.push(`Se muestran ${datos.length} de ${totalEncontrados} productos encontrados. Ajuste el parámetro 'top' si requiere más registros.`);
   }
 
-  const resumen = `Se encontraron ${todasLasFilas.length} registro(s) de stock con filtro '${filtro}'.`;
+  let resumen = `Se encontraron ${totalEncontrados} producto(s) con filtro '${filtro}'`;
+  if (esTruncadoPorTop) {
+    resumen += ` (mostrando los ${datos.length} principales ordenados por ${orden})`;
+  } else {
+    resumen += ` (mostrando ${datos.length})`;
+  }
+  resumen += `.`;
 
   return formatToolResponse({
-    datos: todasLasFilas,
+    datos,
     resumen,
     advertencias,
     truncado,

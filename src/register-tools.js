@@ -265,6 +265,20 @@ export function registerContabiliumTools(server, client) {
           masked = parts.length === 2 ? `${parts[0].slice(0, 2)}***@${parts[1]}` : `${client.clientId.slice(0, 3)}***`;
         }
 
+        let conexionEnVivo = null;
+        if (ping) {
+          const info = await client.get("/usuarios/obtenerinfo");
+          conexionEnVivo = {
+            conectado: true,
+            razonSocial: info?.RazonSocial,
+            cuit: info?.CUIT,
+            condicionIVA: info?.CondicionIVA,
+            tieneFE: Boolean(info?.TieneFE),
+          };
+        } else {
+          await client.ensureValidToken().catch(() => {});
+        }
+
         const report = {
           configuracion: {
             ambiente: esAmbientePruebas 
@@ -280,15 +294,8 @@ export function registerContabiliumTools(server, client) {
           },
         };
 
-        if (ping) {
-          const info = await client.get("/usuarios/obtenerinfo");
-          report.conexionEnVivo = {
-            conectado: true,
-            razonSocial: info?.RazonSocial,
-            cuit: info?.CUIT,
-            condicionIVA: info?.CondicionIVA,
-            tieneFE: Boolean(info?.TieneFE),
-          };
+        if (conexionEnVivo) {
+          report.conexionEnVivo = conexionEnVivo;
         }
 
         return { content: [{ type: "text", text: JSON.stringify(report, null, 2) }] };

@@ -105,7 +105,7 @@ export async function handler({ texto, rubro, limite }, client) {
     datos,
     resumen,
     advertencias: [
-      "stock_total suma todos los depósitos (API-1267). Para stock por depósito, usar stock_por_deposito.",
+      "stock_total suma todos los depósitos. Para stock por depósito, usar stock_por_deposito.",
       "costo_interno representa el costo interno asignado al producto en Contabilium (utilizado como costo de compra / reposición).",
     ],
     truncado: filtered.length > limite,

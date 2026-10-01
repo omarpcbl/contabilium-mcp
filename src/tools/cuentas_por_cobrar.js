@@ -17,10 +17,19 @@ export const schema = {
   agrupar_por: z.enum(["cliente", "comprobante"]).default("cliente").describe("Nivel de detalle: por cliente o por comprobante individual."),
 };
 
+function clasificarTramo(esVencida, diasVencido) {
+  if (!esVencida || diasVencido <= 0) return "no_vencida";
+  if (diasVencido <= 30) return "vencida_1_30";
+  if (diasVencido <= 60) return "vencida_31_60";
+  if (diasVencido <= 90) return "vencida_61_90";
+  return "vencida_mas_90";
+}
+
 export async function handler({ fecha_desde, fecha_hasta, cliente_id, solo_vencidas, agrupar_por }, client) {
   const hoyStr = new Date().toISOString().split("T")[0];
   const finalHasta = fecha_hasta || hoyStr;
   const finalDesde = fecha_desde || subDays(finalHasta, 365); // 12 meses atrás por defecto
+  const usoRangoDefault = !fecha_desde;
 
   // División del rango en tramos de 90 días para respetar el límite de 92 días de la API
   const tramos = [];
@@ -35,6 +44,14 @@ export async function handler({ fecha_desde, fecha_hasta, cliente_id, solo_venci
   const comprobantesConSaldo = [];
   let paginasRestantes = 20; // Tope compartido de 20 páginas
   let truncado = false;
+
+  const antiguedadGeneral = {
+    no_vencida: 0,
+    vencida_1_30: 0,
+    vencida_31_60: 0,
+    vencida_61_90: 0,
+    vencida_mas_90: 0,
+  };
 
   for (const tramo of tramos) {
     if (paginasRestantes <= 0) {
@@ -72,6 +89,9 @@ export async function handler({ fecha_desde, fecha_hasta, cliente_id, solo_venci
           continue;
         }
 
+        const tramoVenc = clasificarTramo(esVencida, diasVencido);
+        antiguedadGeneral[tramoVenc] += saldo;
+
         comprobantesConSaldo.push({
           id: c.Id ?? c.id,
           cliente_id: c.IdCliente ?? c.idCliente,
@@ -82,6 +102,7 @@ export async function handler({ fecha_desde, fecha_hasta, cliente_id, solo_venci
           saldo,
           esVencida,
           diasVencido,
+          tramo_vencimiento: tramoVenc,
         });
       }
     }
@@ -89,11 +110,13 @@ export async function handler({ fecha_desde, fecha_hasta, cliente_id, solo_venci
 
   let datos;
   let saldoTotalGeneral = 0;
+  let saldoVencidoGeneral = 0;
 
   if (agrupar_por === "comprobante") {
     datos = comprobantesConSaldo
       .map((c) => {
         saldoTotalGeneral += c.saldo;
+        if (c.esVencida) saldoVencidoGeneral += c.saldo;
         return {
           numero: c.numero,
           cliente: c.cliente,
@@ -101,6 +124,7 @@ export async function handler({ fecha_desde, fecha_hasta, cliente_id, solo_venci
           fecha_vencimiento: c.fecha_vencimiento,
           saldo: c.saldo,
           dias_vencido: c.diasVencido,
+          tramo_vencimiento: c.tramo_vencimiento,
         };
       })
       .sort((a, b) => b.saldo - a.saldo);
@@ -110,6 +134,8 @@ export async function handler({ fecha_desde, fecha_hasta, cliente_id, solo_venci
 
     for (const c of comprobantesConSaldo) {
       saldoTotalGeneral += c.saldo;
+      if (c.esVencida) saldoVencidoGeneral += c.saldo;
+
       const key = c.cliente;
       const entry = clientesMap.get(key) || {
         cliente: key,
@@ -117,11 +143,19 @@ export async function handler({ fecha_desde, fecha_hasta, cliente_id, solo_venci
         saldo_vencido: 0,
         comprobantes_pendientes: 0,
         vencimiento_mas_antiguo: c.fecha_vencimiento,
+        antiguedad: {
+          no_vencida: 0,
+          vencida_1_30: 0,
+          vencida_31_60: 0,
+          vencida_61_90: 0,
+          vencida_mas_90: 0,
+        },
       };
 
       entry.saldo_total += c.saldo;
       if (c.esVencida) entry.saldo_vencido += c.saldo;
       entry.comprobantes_pendientes += 1;
+      entry.antiguedad[c.tramo_vencimiento] += c.saldo;
 
       if (c.fecha_vencimiento && (!entry.vencimiento_mas_antiguo || c.fecha_vencimiento < entry.vencimiento_mas_antiguo)) {
         entry.vencimiento_mas_antiguo = c.fecha_vencimiento;
@@ -137,21 +171,57 @@ export async function handler({ fecha_desde, fecha_hasta, cliente_id, solo_venci
         saldo_vencido: Math.round(e.saldo_vencido * 100) / 100,
         comprobantes_pendientes: e.comprobantes_pendientes,
         vencimiento_mas_antiguo: e.vencimiento_mas_antiguo,
+        antiguedad_deuda: {
+          no_vencida: Math.round(e.antiguedad.no_vencida * 100) / 100,
+          vencida_1_30: Math.round(e.antiguedad.vencida_1_30 * 100) / 100,
+          vencida_31_60: Math.round(e.antiguedad.vencida_31_60 * 100) / 100,
+          vencida_61_90: Math.round(e.antiguedad.vencida_61_90 * 100) / 100,
+          vencida_mas_90: Math.round(e.antiguedad.vencida_mas_90 * 100) / 100,
+        },
       }))
       .sort((a, b) => b.saldo_total - a.saldo_total);
   }
 
+  const saldoNoVencidoGeneral = Math.max(0, saldoTotalGeneral - saldoVencidoGeneral);
+
   const advertencias = [
     "Saldo calculado desde comprobantes con saldo pendiente. No incluye pagos a cuenta ni ajustes de cuenta corriente, puede diferir del reporte Saldo de clientes.",
   ];
+  if (usoRangoDefault) {
+    advertencias.push(
+      `Se utilizó el rango por defecto de los últimos 12 meses (${finalDesde} al ${finalHasta}). Deuda anterior a 12 meses no está incluida; para consultarla especifique 'fecha_desde'.`
+    );
+  }
   if (truncado) {
     advertencias.push("Búsqueda limitada por tope de 20 páginas entre tramos. Se sugiere acotar el rango de fechas para mayor exactitud.");
   }
 
-  const resumen = `Deuda total encontrada: ${formatCurrency(saldoTotalGeneral)} en ${comprobantesConSaldo.length} comprobante(s) pendiente(s).`;
+  const resumen = `Deuda total encontrada: ${formatCurrency(saldoTotalGeneral)} (Vencida: ${formatCurrency(
+    saldoVencidoGeneral
+  )}, A vencer: ${formatCurrency(saldoNoVencidoGeneral)}) en ${comprobantesConSaldo.length} comprobante(s) pendiente(s) (período analizado: ${finalDesde} al ${finalHasta}).`;
 
   return formatToolResponse({
-    datos,
+    datos: {
+      totales: {
+        saldo_total: Math.round(saldoTotalGeneral * 100) / 100,
+        saldo_vencido: Math.round(saldoVencidoGeneral * 100) / 100,
+        saldo_no_vencido: Math.round(saldoNoVencidoGeneral * 100) / 100,
+        comprobantes_pendientes: comprobantesConSaldo.length,
+        periodo_analizado: {
+          desde: finalDesde,
+          hasta: finalHasta,
+          es_rango_por_defecto: usoRangoDefault,
+        },
+        antiguedad_deuda_general: {
+          no_vencida: Math.round(antiguedadGeneral.no_vencida * 100) / 100,
+          vencida_1_30: Math.round(antiguedadGeneral.vencida_1_30 * 100) / 100,
+          vencida_31_60: Math.round(antiguedadGeneral.vencida_31_60 * 100) / 100,
+          vencida_61_90: Math.round(antiguedadGeneral.vencida_61_90 * 100) / 100,
+          vencida_mas_90: Math.round(antiguedadGeneral.vencida_mas_90 * 100) / 100,
+        },
+      },
+      filas: datos,
+    },
     resumen,
     advertencias,
     truncado,
