@@ -1,5 +1,6 @@
 import * as buscarClientes from "./tools/buscar_clientes.js";
 import * as buscarProductos from "./tools/buscar_productos.js";
+import * as modificarConcepto from "./tools/modificar_concepto.js";
 import * as buscarProveedores from "./tools/buscar_proveedores.js";
 import * as listarDepositos from "./tools/listar_depositos.js";
 import * as listarVentas from "./tools/listar_ventas.js";
@@ -68,6 +69,23 @@ export function registerContabiliumTools(server, client) {
       } catch (err) {
         return {
           content: [{ type: "text", text: JSON.stringify({ error: err.message, datos: [], resumen: "Error en la consulta", advertencias: [err.message], truncado: false }, null, 2) }],
+          isError: true,
+        };
+      }
+    }
+  );
+
+  // 2b. modificar_concepto
+  server.tool(
+    "modificar_concepto",
+    "Modifica los datos de un concepto, producto o servicio existente en el catálogo de Contabilium (precio, costo interno, alícuota de IVA, nombre, descripción, estado activo/inactivo, rubro, código de barras, SKU, etc.). No crea conceptos nuevos, únicamente actualiza conceptos existentes.",
+    modificarConcepto.schema,
+    async (args) => {
+      try {
+        return await modificarConcepto.handler(args, client);
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ error: err.message, datos: null, resumen: "Error al modificar concepto", advertencias: [err.message], truncado: false }, null, 2) }],
           isError: true,
         };
       }

@@ -378,24 +378,29 @@ function renderMainPortalHtml() {
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200" />
   <style>
     :root {
-      /* Colores Esencia Contabilium */
-      --cbl-brand: #00C7AF;             /* Turquesa / Teal Primario Contabilium */
-      --cbl-brand-hover: #00E2C8;       /* Hover más luminoso */
-      --cbl-brand-active: #00A994;      /* Active / Pressed */
-      --cbl-brand-tint: rgba(0, 199, 175, 0.12); /* Glow / Badge de fondo */
-      --cbl-brand-glow: rgba(0, 199, 175, 0.25); /* Focus Ring / Glow */
+      /* Colores Esencia Contabilium (Acabado sobrio sin exceso de neón) */
+      --cbl-brand: #00C7AF;             /* Turquesa Primario Contabilium */
+      --cbl-brand-hover: #00B39D;       /* Hover elegante */
+      --cbl-brand-active: #009E8B;      /* Active / Pressed */
+      --cbl-brand-tint: rgba(0, 199, 175, 0.08); /* Fondo sutil para badges */
+      --cbl-brand-glow: rgba(0, 199, 175, 0.16); /* Anillo de foco nítido y fino, sin neón difuso */
+
+      /* Magenta / Fucsia Contabilium para cambio de estado */
+      --cbl-magenta: #E6007E;
+      --cbl-magenta-hover: #D00071;
+      --cbl-magenta-gradient: linear-gradient(135deg, #E6007E 0%, #9C0052 100%);
 
       /* Estados del Sistema (según Design Kit de Contabilium) */
       --cbl-success-text: #00E5C8;
-      --cbl-success-bg: rgba(0, 199, 175, 0.12);
+      --cbl-success-bg: rgba(0, 199, 175, 0.10);
       --cbl-success-accent: #00C7AF;
 
       --cbl-danger-text: #FF648A;
-      --cbl-danger-bg: rgba(243, 36, 101, 0.14);
+      --cbl-danger-bg: rgba(243, 36, 101, 0.12);
       --cbl-danger-accent: #F32465;
 
       --cbl-warning-text: #FFB347;
-      --cbl-warning-bg: rgba(255, 140, 0, 0.14);
+      --cbl-warning-bg: rgba(255, 140, 0, 0.12);
       --cbl-warning-accent: #FF8C00;
 
       /* Material 3 / Modern Dark Theme Surfaces */
@@ -431,7 +436,7 @@ function renderMainPortalHtml() {
       overflow-x: hidden;
     }
 
-    /* Fondo ambiental sutil con el glow turquesa de Contabilium */
+    /* Fondo ambiental neutro sobrio (elimina manchas de neón artificiales) */
     body::before {
       content: "";
       position: absolute;
@@ -440,7 +445,7 @@ function renderMainPortalHtml() {
       transform: translateX(-50%);
       width: 680px;
       height: 480px;
-      background: radial-gradient(circle, rgba(0, 199, 175, 0.12) 0%, rgba(7, 8, 11, 0) 70%);
+      background: radial-gradient(circle, rgba(255, 255, 255, 0.02) 0%, rgba(7, 8, 11, 0) 70%);
       pointer-events: none;
       z-index: 0;
     }
@@ -477,12 +482,12 @@ function renderMainPortalHtml() {
       border-radius: 14px;
       background: var(--cbl-brand-tint);
       color: var(--cbl-brand);
-      border: 1px solid rgba(0, 199, 175, 0.25);
+      border: 1px solid rgba(0, 199, 175, 0.2);
       display: flex;
       align-items: center;
       justify-content: center;
       flex-shrink: 0;
-      box-shadow: 0 4px 16px rgba(0, 199, 175, 0.15);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
     }
 
     .header-icon-box .material-symbols-outlined {
@@ -704,7 +709,7 @@ function renderMainPortalHtml() {
       padding: 13px 24px;
       background: var(--cbl-brand);
       color: #07090D;
-      border: none;
+      border: 1px solid rgba(0, 0, 0, 0.12);
       border-radius: 12px;
       font-family: inherit;
       font-weight: 700;
@@ -715,25 +720,49 @@ function renderMainPortalHtml() {
       justify-content: center;
       gap: 10px;
       cursor: pointer;
-      box-shadow: 0 4px 18px rgba(0, 199, 175, 0.35);
-      transition: background-color 0.2s, box-shadow 0.2s, transform 0.15s var(--m3-motion-standard);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+      transition: background 0.25s ease, color 0.2s ease, box-shadow 0.2s ease, transform 0.15s var(--m3-motion-standard);
       position: relative;
       overflow: hidden;
     }
 
-    .btn-submit:hover:not(:disabled) {
+    .btn-submit:hover:not(:disabled):not(.is-connecting):not(.is-connected) {
       background: var(--cbl-brand-hover);
-      box-shadow: 0 6px 24px rgba(0, 199, 175, 0.45);
+      box-shadow: 0 3px 8px rgba(0, 0, 0, 0.45);
       transform: translateY(-1px);
     }
 
-    .btn-submit:active:not(:disabled) {
+    .btn-submit:active:not(:disabled):not(.is-connecting):not(.is-connected) {
       background: var(--cbl-brand-active);
       transform: translateY(0);
-      box-shadow: 0 2px 8px rgba(0, 199, 175, 0.3);
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
     }
 
-    .btn-submit:disabled {
+    /* Cambio de estado al conectar: Gradiente Magenta de Contabilium */
+    .btn-submit.is-connecting {
+      background: var(--cbl-magenta-gradient) !important;
+      color: #FFFFFF !important;
+      border-color: rgba(255, 255, 255, 0.15) !important;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+      cursor: wait;
+      opacity: 1 !important;
+    }
+
+    /* Estado: Conectado exitosamente */
+    .btn-submit.is-connected {
+      background: linear-gradient(135deg, #E6007E 0%, #8E004B 100%) !important;
+      color: #FFFFFF !important;
+      border: 1px solid rgba(255, 255, 255, 0.2) !important;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    }
+
+    .btn-submit.is-connected:hover {
+      background: linear-gradient(135deg, #F01A8D 0%, #9C0052 100%) !important;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    }
+
+    .btn-submit:disabled:not(.is-connecting):not(.is-connected) {
       background: #1F2430;
       color: #555E70;
       box-shadow: none;
@@ -756,7 +785,7 @@ function renderMainPortalHtml() {
     .linear-progress::before {
       content: "";
       position: absolute;
-      background: var(--cbl-brand);
+      background: var(--cbl-magenta);
       top: 0;
       left: 0;
       bottom: 0;
@@ -803,11 +832,11 @@ function renderMainPortalHtml() {
       display: none;
       margin-top: 24px;
       background: var(--m3-surface-container-high);
-      border: 1px solid var(--cbl-brand);
+      border: 1px solid rgba(0, 199, 175, 0.35);
       border-radius: 18px;
       padding: 24px;
       animation: fadeIn 0.3s ease-out;
-      box-shadow: 0 10px 30px rgba(0, 199, 175, 0.1);
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
     }
 
     @keyframes fadeIn {
@@ -925,7 +954,7 @@ function renderMainPortalHtml() {
       justify-content: center;
       cursor: pointer;
       transition: background-color 0.15s, transform 0.15s;
-      box-shadow: 0 2px 8px rgba(0, 199, 175, 0.35);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
     }
 
     .copy-icon-btn:hover {
@@ -1218,7 +1247,7 @@ function renderMainPortalHtml() {
       align-items: center;
       justify-content: center;
       flex-shrink: 0;
-      box-shadow: 0 2px 8px rgba(0, 199, 175, 0.35);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
       margin-top: 2px;
     }
 
@@ -1864,7 +1893,17 @@ function renderMainPortalHtml() {
       }
     });
 
+    function resetConnectedState() {
+      if (submitBtn.classList.contains("is-connected") || submitBtn.classList.contains("is-connecting")) {
+        submitBtn.classList.remove("is-connected", "is-connecting");
+        btnIcon.innerText = "bolt";
+        btnIcon.style.animation = "none";
+        btnText.innerText = "Verificar y Conectar";
+      }
+    }
+
     clientIdInput.addEventListener("input", () => {
+      resetConnectedState();
       clientIdContainer.classList.remove("input-error");
       clientIdError.style.display = "none";
       clientIdInput.setAttribute("aria-invalid", "false");
@@ -1872,11 +1911,14 @@ function renderMainPortalHtml() {
     });
 
     clientSecretInput.addEventListener("input", () => {
+      resetConnectedState();
       clientSecretContainer.classList.remove("input-error");
       clientSecretError.style.display = "none";
       clientSecretInput.setAttribute("aria-invalid", "false");
       errorBox.style.display = "none";
     });
+
+    document.getElementById("country")?.addEventListener("change", resetConnectedState);
 
     // Cambiar tabs entre Streamable HTTP y SSE
     function switchUrlTab(tab) {
@@ -1934,11 +1976,15 @@ function renderMainPortalHtml() {
       }
 
       submitBtn.disabled = true;
+      submitBtn.classList.remove("is-connected");
+      submitBtn.classList.add("is-connecting");
       submitBtn.setAttribute("aria-busy", "true");
       btnIcon.innerText = "sync";
       btnIcon.style.animation = "spin 1s infinite linear";
       btnText.innerText = "Autenticando con Contabilium...";
       progressBar.style.display = "block";
+
+      let isSuccess = false;
 
       try {
         const response = await fetch("/api/generate-token", {
@@ -1953,6 +1999,7 @@ function renderMainPortalHtml() {
           errorText.innerText = data.error || "Error al verificar las credenciales.";
           errorBox.style.display = "flex";
         } else {
+          isSuccess = true;
           currentStreamableUrl = data.url;
           currentSseUrl = data.sseUrl || data.url.replace("/mcp?", "/sse?");
           
@@ -1970,10 +2017,20 @@ function renderMainPortalHtml() {
       } finally {
         submitBtn.disabled = false;
         submitBtn.setAttribute("aria-busy", "false");
-        btnIcon.innerText = "bolt";
-        btnIcon.style.animation = "none";
-        btnText.innerText = "Verificar y Conectar";
         progressBar.style.display = "none";
+        submitBtn.classList.remove("is-connecting");
+
+        if (isSuccess) {
+          submitBtn.classList.add("is-connected");
+          btnIcon.innerText = "check_circle";
+          btnIcon.style.animation = "none";
+          btnText.innerText = "Conexión Establecida";
+        } else {
+          submitBtn.classList.remove("is-connected");
+          btnIcon.innerText = "bolt";
+          btnIcon.style.animation = "none";
+          btnText.innerText = "Verificar y Conectar";
+        }
       }
     });
 
@@ -2037,12 +2094,13 @@ function renderAccessGateHtml() {
   <style>
     :root {
       --cbl-brand: #00C7AF;
-      --cbl-brand-hover: #00E2C8;
-      --cbl-brand-active: #00A994;
-      --cbl-brand-tint: rgba(0, 199, 175, 0.12);
-      --cbl-brand-glow: rgba(0, 199, 175, 0.25);
+      --cbl-brand-hover: #00B39D;
+      --cbl-brand-active: #009E8B;
+      --cbl-brand-tint: rgba(0, 199, 175, 0.08);
+      --cbl-brand-glow: rgba(0, 199, 175, 0.16);
+      --cbl-magenta-gradient: linear-gradient(135deg, #E6007E 0%, #9C0052 100%);
       --cbl-danger-text: #FF648A;
-      --cbl-danger-bg: rgba(243, 36, 101, 0.14);
+      --cbl-danger-bg: rgba(243, 36, 101, 0.12);
       --cbl-danger-accent: #F32465;
       --m3-surface: #0E1015;
       --m3-surface-container: #141720;
@@ -2076,7 +2134,7 @@ function renderAccessGateHtml() {
       transform: translateX(-50%);
       width: 680px;
       height: 480px;
-      background: radial-gradient(circle, rgba(0, 199, 175, 0.12) 0%, rgba(7, 8, 11, 0) 70%);
+      background: radial-gradient(circle, rgba(255, 255, 255, 0.02) 0%, rgba(7, 8, 11, 0) 70%);
       pointer-events: none;
       z-index: 0;
     }
@@ -2111,11 +2169,11 @@ function renderAccessGateHtml() {
       border-radius: 16px;
       background: var(--cbl-brand-tint);
       color: var(--cbl-brand);
-      border: 1px solid rgba(0, 199, 175, 0.3);
+      border: 1px solid rgba(0, 199, 175, 0.2);
       display: flex;
       align-items: center;
       justify-content: center;
-      box-shadow: 0 0 24px rgba(0, 199, 175, 0.2);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
     }
     .gate-icon-box .material-symbols-outlined {
       font-size: 28px;
@@ -2208,7 +2266,7 @@ function renderAccessGateHtml() {
       padding: 13px 20px;
       background: var(--cbl-brand);
       color: #07090D;
-      border: none;
+      border: 1px solid rgba(0, 0, 0, 0.12);
       border-radius: 12px;
       font-family: inherit;
       font-weight: 700;
@@ -2218,15 +2276,23 @@ function renderAccessGateHtml() {
       align-items: center;
       justify-content: center;
       gap: 8px;
-      box-shadow: 0 4px 18px rgba(0, 199, 175, 0.35);
-      transition: all 0.2s var(--m3-motion-standard);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+      transition: background 0.25s ease, color 0.2s ease, box-shadow 0.2s ease, transform 0.15s var(--m3-motion-standard);
     }
-    .btn-gate-submit:hover:not(:disabled) {
+    .btn-gate-submit:hover:not(:disabled):not(.is-connecting) {
       background: var(--cbl-brand-hover);
-      box-shadow: 0 6px 24px rgba(0, 199, 175, 0.45);
+      box-shadow: 0 3px 8px rgba(0, 0, 0, 0.45);
       transform: translateY(-1px);
     }
-    .btn-gate-submit:disabled {
+    .btn-gate-submit.is-connecting {
+      background: var(--cbl-magenta-gradient) !important;
+      color: #FFFFFF !important;
+      border-color: rgba(255, 255, 255, 0.15) !important;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+      cursor: wait;
+      opacity: 1 !important;
+    }
+    .btn-gate-submit:disabled:not(.is-connecting) {
       background: #1F2430;
       color: #555E70;
       cursor: not-allowed;
@@ -2337,6 +2403,7 @@ function renderAccessGateHtml() {
 
       gateErrorBox.style.display = 'none';
       gateSubmitBtn.disabled = true;
+      gateSubmitBtn.classList.add('is-connecting');
       gateSubmitBtn.innerHTML = '<span class="material-symbols-outlined" style="animation:spin 1s infinite linear; font-size:18px;">sync</span><span>Validando clave...</span>';
 
       try {
@@ -2358,6 +2425,7 @@ function renderAccessGateHtml() {
         gateErrorBox.style.display = 'block';
       } finally {
         gateSubmitBtn.disabled = false;
+        gateSubmitBtn.classList.remove('is-connecting');
         gateSubmitBtn.innerHTML = '<span class="material-symbols-outlined" style="font-size:18px;">lock_open</span><span>Desbloquear interfaz</span>';
       }
     });
@@ -2528,10 +2596,10 @@ app.get(QA_PATH, (req, res) => {
   <style>
     :root {
       --cbl-brand: #00C7AF;
-      --cbl-brand-hover: #00E2C8;
-      --cbl-brand-active: #00A994;
-      --cbl-brand-tint: rgba(0, 199, 175, 0.12);
-      --cbl-brand-glow: rgba(0, 199, 175, 0.25);
+      --cbl-brand-hover: #00B39D;
+      --cbl-brand-active: #009E8B;
+      --cbl-brand-tint: rgba(0, 199, 175, 0.08);
+      --cbl-brand-glow: rgba(0, 199, 175, 0.16);
 
       --qa-accent: #FF9800;
       --qa-bg-tint: rgba(255, 152, 0, 0.14);
@@ -2567,7 +2635,7 @@ app.get(QA_PATH, (req, res) => {
       transform: translateX(-50%);
       width: 680px;
       height: 480px;
-      background: radial-gradient(circle, rgba(255, 152, 0, 0.12) 0%, rgba(7, 8, 11, 0) 70%);
+      background: radial-gradient(circle, rgba(255, 255, 255, 0.02) 0%, rgba(7, 8, 11, 0) 70%);
       pointer-events: none;
       z-index: 0;
     }
@@ -2741,14 +2809,22 @@ app.get(QA_PATH, (req, res) => {
       justify-content: center;
       gap: 8px;
       margin-top: 10px;
-      box-shadow: 0 4px 18px rgba(0, 199, 175, 0.35);
-      transition: all 0.2s;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+      transition: background 0.25s ease, color 0.2s ease, box-shadow 0.2s ease, transform 0.15s;
     }
-    .btn-submit:hover:not(:disabled) {
+    .btn-submit:hover:not(:disabled):not(.is-connecting) {
       background: var(--cbl-brand-hover);
+      box-shadow: 0 3px 8px rgba(0, 0, 0, 0.45);
       transform: translateY(-1px);
     }
-    .btn-submit:disabled {
+    .btn-submit.is-connecting {
+      background: linear-gradient(135deg, #E6007E 0%, #9C0052 100%) !important;
+      color: #FFFFFF !important;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+      cursor: wait;
+      opacity: 1 !important;
+    }
+    .btn-submit:disabled:not(.is-connecting) {
       background: #1F2430;
       color: #555E70;
       cursor: not-allowed;
@@ -2877,6 +2953,7 @@ app.get(QA_PATH, (req, res) => {
             e.preventDefault();
             const btn = document.getElementById('btnGenQa');
             btn.disabled = true;
+            btn.classList.add('is-connecting');
             btn.innerHTML = '<span class=\"material-symbols-outlined\" style=\"animation:spin 1s infinite linear; font-size:18px;\">sync</span><span>Verificando con Contabilium QA...</span>';
             try {
               const res = await fetch('/api/generate-token', {
@@ -2900,6 +2977,7 @@ app.get(QA_PATH, (req, res) => {
               alert('Error de conexión: ' + err.message);
             } finally {
               btn.disabled = false;
+              btn.classList.remove('is-connecting');
               btn.innerHTML = '<span class=\"material-symbols-outlined\" style=\"font-size:18px;\">key</span><span>Generar URL QA</span>';
             }
           });

@@ -32,6 +32,7 @@ Además, incorpora `registrar_consulta_no_soportada` como instrumento de Product
 |---|---|---|
 | `buscar_clientes` | Catálogo | Busca clientes por nombre, razón social o CUIT. Devuelve IDs necesarios para filtrar ventas y deudas. |
 | `buscar_productos` | Catálogo | Busca productos por SKU o nombre. Devuelve código, descripción, precio de venta, stock total, costo_interno y proveedor. |
+| `modificar_concepto` | Catálogo / Edición | Modifica datos de un concepto existente (precio, costo interno, IVA, nombre, descripción, estado activo/inactivo, rubro, código de barras). No crea nuevos. |
 | `buscar_proveedores` | Compras | Busca proveedores por nombre, razón social o CUIT con datos de contacto para reposición. |
 | `listar_depositos` | Catálogo | Lista los depósitos configurados con sus IDs. Usar antes de consultar stock por depósito. |
 | `listar_ventas` | Ventas | Lista comprobantes de venta emitidos en un período. Máximo 92 días por consulta. |

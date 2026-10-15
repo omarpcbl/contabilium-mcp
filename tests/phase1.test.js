@@ -4,6 +4,7 @@ import * as resumenVentas from "../src/tools/resumen_ventas.js";
 import * as stockPorDeposito from "../src/tools/stock_por_deposito.js";
 import * as cuentasPorCobrar from "../src/tools/cuentas_por_cobrar.js";
 import * as buscarProductos from "../src/tools/buscar_productos.js";
+import * as modificarConcepto from "../src/tools/modificar_concepto.js";
 import * as quePuedoConsultar from "../src/tools/que_puedo_consultar.js";
 import * as registrarConsultaNoSoportada from "../src/tools/registrar_consulta_no_soportada.js";
 import * as diagnosticarOrden from "../src/tools/diagnosticar_orden.js";
@@ -267,11 +268,12 @@ describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
       assert.equal(registeredTools.has("emitir_factura_express"), false);
       assert.equal(registeredTools.has("obtener_factura_pdf"), false);
 
-      // Sí están las 13 de lectura, asistencia, órdenes y diagnóstico
+      // Sí están las 14 de lectura, asistencia, modificación, órdenes y diagnóstico
       const expectedTools = [
         "que_puedo_consultar",
         "buscar_clientes",
         "buscar_productos",
+        "modificar_concepto",
         "buscar_proveedores",
         "listar_depositos",
         "listar_ventas",
@@ -287,7 +289,7 @@ describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
       for (const t of expectedTools) {
         assert.equal(registeredTools.has(t), true, `La tool ${t} debe estar registrada`);
       }
-      assert.equal(registeredTools.size, 13);
+      assert.equal(registeredTools.size, 14);
     });
 
     it("SYSTEM_INSTRUCTION instruye rechazar facturación indicando que no está habilitado actualmente (MEJ-10)", () => {
@@ -1561,6 +1563,196 @@ describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
       // Resuelto exitosamente a su nombre comercial en lugar de quedar como el código SKU en bruto
       assert.equal(parsed.datos[0].producto, "COMBO QA");
       assert.equal(parsed.datos[0].disponible, 15);
+    });
+  });
+
+  describe("modificar_concepto (Edición y Actualización de Conceptos)", () => {
+    it("modifica precio de un concepto por ID y calcula automáticamente precio_final con IVA", async () => {
+      let putLlamado = null;
+      const mockConcepto = {
+        Id: 10535931,
+        Nombre: "ZAPATILLAS RUNNING",
+        Codigo: "SKU-ZAP-01",
+        Tipo: "Producto",
+        Estado: "Activo",
+        Precio: 10000,
+        PrecioFinal: 12100,
+        Iva: 21,
+        CostoInterno: 6000,
+        Rentabilidad: 40,
+        Stock: 50,
+        StockMinimo: 5,
+        IdRubro: "12",
+      };
+
+      const mockClient = {
+        clientId: "empresa@test.com",
+        cache: new Map([["/conceptos/search?filtro=zap", { test: 1 }]]),
+        get: async (endpoint, params) => {
+          if (endpoint === "/conceptos" && params?.id === 10535931) {
+            return mockConcepto;
+          }
+          return null;
+        },
+        put: async (endpoint, body) => {
+          putLlamado = { endpoint, body };
+          return { ok: true };
+        },
+      };
+
+      const res = await modificarConcepto.handler(
+        { id: 10535931, precio: 15000 },
+        mockClient
+      );
+
+      const parsed = JSON.parse(res.content[0].text);
+      assert.equal(parsed.datos.id, 10535931);
+      assert.equal(parsed.datos.precio, 15000);
+      assert.equal(parsed.datos.precio_final, 18150); // 15000 * 1.21
+      assert.equal(putLlamado.endpoint, "/conceptos?id=10535931");
+      assert.equal(putLlamado.body.Precio, 15000);
+      assert.equal(putLlamado.body.PrecioFinal, 18150);
+      // Tipo y Estado normalizados a formato backend Contabilium
+      assert.equal(putLlamado.body.Tipo, "P");
+      assert.equal(putLlamado.body.Estado, "A");
+      // Mantiene campos no modificados
+      assert.equal(putLlamado.body.Nombre, "ZAPATILLAS RUNNING");
+      assert.equal(putLlamado.body.Codigo, "SKU-ZAP-01");
+      assert.equal(putLlamado.body.CostoInterno, 6000);
+      // Invalida caché de conceptos
+      assert.equal(mockClient.cache.size, 0);
+    });
+
+    it("modifica concepto por SKU (codigo), actualiza nombre, costo interno y desactiva estado", async () => {
+      let putLlamado = null;
+      const mockConcepto = {
+        Id: 4400,
+        Nombre: "REMERON OVERSIZE",
+        Codigo: "REM-OVER-01",
+        Tipo: "P",
+        Estado: "A",
+        Precio: 8000,
+        PrecioFinal: 9680,
+        Iva: 21,
+        CostoInterno: 4000,
+      };
+
+      const mockClient = {
+        clientId: "empresa@test.com",
+        get: async (endpoint, params) => {
+          if (endpoint === "/conceptos/getByCodigo" && params?.codigo === "REM-OVER-01") {
+            return mockConcepto;
+          }
+          return null;
+        },
+        put: async (endpoint, body) => {
+          putLlamado = { endpoint, body };
+          return { ok: true };
+        },
+      };
+
+      const res = await modificarConcepto.handler(
+        {
+          codigo: "REM-OVER-01",
+          nombre: "REMERON OVERSIZE VERANO",
+          costo_interno: 4500,
+          estado: "Inactivo",
+        },
+        mockClient
+      );
+
+      const parsed = JSON.parse(res.content[0].text);
+      assert.equal(parsed.datos.nombre, "REMERON OVERSIZE VERANO");
+      assert.equal(parsed.datos.costo_interno, 4500);
+      assert.equal(parsed.datos.estado, "Inactivo");
+      assert.equal(putLlamado.body.Estado, "I");
+      assert.equal(putLlamado.body.Nombre, "REMERON OVERSIZE VERANO");
+      assert.equal(putLlamado.body.CostoInterno, 4500);
+      assert.equal(putLlamado.body.Precio, 8000); // preservado
+    });
+
+    it("falla con mensaje descriptivo si no se envía ni id ni codigo", async () => {
+      const mockClient = { clientId: "test@test.com" };
+      await assert.rejects(
+        async () => {
+          await modificarConcepto.handler({ nombre: "Nuevo" }, mockClient);
+        },
+        /Debe especificar el 'id' numérico o el 'codigo'/
+      );
+    });
+
+    it("falla con mensaje amigable si el concepto no existe en Contabilium", async () => {
+      const mockClient = {
+        clientId: "test@test.com",
+        get: async () => null,
+      };
+      await assert.rejects(
+        async () => {
+          await modificarConcepto.handler({ codigo: "SKU-INEXISTENTE", precio: 100 }, mockClient);
+        },
+        /No se encontró ningún concepto in Contabilium|No se encontró ningún concepto en Contabilium con código SKU 'SKU-INEXISTENTE'/
+      );
+    });
+
+    it("retorna mensaje sin cambios si los valores enviados coinciden con los registrados", async () => {
+      let putEjecutado = false;
+      const mockConcepto = {
+        Id: 50,
+        Nombre: "MOUSE INALAMBRICO",
+        Codigo: "MOUSE-01",
+        Tipo: "P",
+        Estado: "A",
+        Precio: 2000,
+        Iva: 21,
+      };
+
+      const mockClient = {
+        get: async () => mockConcepto,
+        put: async () => {
+          putEjecutado = true;
+        },
+      };
+
+      const res = await modificarConcepto.handler(
+        { id: 50, nombre: "MOUSE INALAMBRICO", precio: 2000 },
+        mockClient
+      );
+
+      const parsed = JSON.parse(res.content[0].text);
+      assert.match(parsed.resumen, /No se realizaron cambios/);
+      assert.equal(putEjecutado, false);
+    });
+
+    it("respeta el control de acceso por cuenta cuando se define lista blanca", async () => {
+      const prevEnv = process.env.MODIFICAR_CONCEPTO_ALLOWED_ACCOUNTS;
+      try {
+        process.env.MODIFICAR_CONCEPTO_ALLOWED_ACCOUNTS = "permitida@test.com,otra@test.com";
+
+        // Cuenta no autorizada
+        const clientNoAuth = { clientId: "bloqueada@test.com" };
+        await assert.rejects(
+          async () => {
+            await modificarConcepto.handler({ id: 1, precio: 10 }, clientNoAuth);
+          },
+          /no tiene permisos habilitados para modificar conceptos/
+        );
+
+        // Cuenta autorizada
+        const clientAuth = {
+          clientId: "permitida@test.com",
+          get: async () => ({ Id: 1, Codigo: "SKU-1", Nombre: "Prod 1", Tipo: "P", Estado: "A", Precio: 5, Iva: 21 }),
+          put: async () => ({ ok: true }),
+        };
+        const res = await modificarConcepto.handler({ id: 1, precio: 10 }, clientAuth);
+        const parsed = JSON.parse(res.content[0].text);
+        assert.equal(parsed.datos.precio, 10);
+      } finally {
+        if (prevEnv !== undefined) {
+          process.env.MODIFICAR_CONCEPTO_ALLOWED_ACCOUNTS = prevEnv;
+        } else {
+          delete process.env.MODIFICAR_CONCEPTO_ALLOWED_ACCOUNTS;
+        }
+      }
     });
   });
 
