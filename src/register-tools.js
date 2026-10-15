@@ -1,6 +1,7 @@
 import * as buscarClientes from "./tools/buscar_clientes.js";
 import * as buscarProductos from "./tools/buscar_productos.js";
 import * as modificarConcepto from "./tools/modificar_concepto.js";
+import * as modificarStockConcepto from "./tools/modificar_stock_concepto.js";
 import * as buscarProveedores from "./tools/buscar_proveedores.js";
 import * as listarDepositos from "./tools/listar_depositos.js";
 import * as listarVentas from "./tools/listar_ventas.js";
@@ -86,6 +87,23 @@ export function registerContabiliumTools(server, client) {
       } catch (err) {
         return {
           content: [{ type: "text", text: JSON.stringify({ error: err.message, datos: null, resumen: "Error al modificar concepto", advertencias: [err.message], truncado: false }, null, 2) }],
+          isError: true,
+        };
+      }
+    }
+  );
+
+  // 2c. modificar_stock_concepto
+  server.tool(
+    "modificar_stock_concepto",
+    "Modifica o reemplaza el stock físico (y opcionalmente el precio) de un concepto/producto en Contabilium identificándolo por SKU o por ID en un depósito específico (o depósito central por defecto).",
+    modificarStockConcepto.schema,
+    async (args) => {
+      try {
+        return await modificarStockConcepto.handler(args, client);
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ error: err.message, datos: null, resumen: "Error al modificar stock del concepto", advertencias: [err.message], truncado: false }, null, 2) }],
           isError: true,
         };
       }

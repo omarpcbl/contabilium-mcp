@@ -52,12 +52,13 @@ export async function handler({ categoria = "todos" }, client) {
 
   const moduloStock = {
     nombre: "Inventario, Catálogo y Stock por Depósito",
-    tools: ["stock_por_deposito", "buscar_productos", "listar_depositos", "modificar_concepto"],
+    tools: ["stock_por_deposito", "buscar_productos", "listar_depositos", "modificar_concepto", "modificar_stock_concepto"],
     capacidades: [
       "Consultar existencias físicas, reservas comprometidas y disponible real.",
       "Detectar sobreventas críticas y existencias físicas negativas.",
       "Buscar productos por SKU o nombre con su costo interno registrado.",
       "Modificar precio, costo interno, alícuota de IVA, descripción o estado de conceptos existentes (sin crear nuevos).",
+      "Modificar o reemplazar el stock físico de un producto en un depósito por SKU o por ID.",
       ...(depositos.length > 0 ? [`Depósitos activos disponibles: ${depositos.slice(0, 3).join(", ")}.`] : []),
     ],
     preguntas_ejemplo: [
@@ -65,6 +66,7 @@ export async function handler({ categoria = "todos" }, client) {
       "Listame los 10 productos con menor disponible para reponer.",
       "Buscá el producto con código 'CASCO' y decime su precio y costo interno.",
       "Cambiá el precio del producto 'CASCO-01' a $ 15.000.",
+      "Ajustá el stock del SKU 'REM-01' a 25 unidades en el depósito central.",
     ],
   };
 

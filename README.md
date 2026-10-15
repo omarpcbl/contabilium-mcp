@@ -39,6 +39,7 @@ Además, incorpora `registrar_consulta_no_soportada` como instrumento de Product
 | `resumen_ventas` | Ventas | Totaliza ventas por período, agrupables por día, semana, mes o cliente. Resta Notas de Crédito. |
 | `buscar_ordenes_venta` | Ventas / E-commerce | Busca órdenes de preventa o e-commerce por rango de fechas, filtro (número de orden externa) e ID de integración opcional. |
 | `stock_por_deposito` | Stock | Consulta stock actual y reservado de un producto en un depósito específico o en todos. Calcula disponible real. |
+| `modificar_stock_concepto` | Stock / Edición | Modifica o reemplaza el stock físico (y opcionalmente precio) de un producto por SKU o por ID en un depósito. |
 | `cuentas_por_cobrar` | Deuda | Lista comprobantes con saldo pendiente de cobro y totaliza deuda agrupada por cliente. |
 | `diagnosticar_orden` | Diagnóstico | Diagnóstico automatizado de órdenes e integraciones e-commerce (detecta duplicados, valida CUIT/RUT, stock y causa raíz). |
 | `crear_borrador_factura` | Facturación | **Paso 1 seguro:** Guarda un borrador en Contabilium con precálculo fiscal AFIP y devuelve preview para confirmación humana. |

@@ -5,6 +5,7 @@ import * as stockPorDeposito from "../src/tools/stock_por_deposito.js";
 import * as cuentasPorCobrar from "../src/tools/cuentas_por_cobrar.js";
 import * as buscarProductos from "../src/tools/buscar_productos.js";
 import * as modificarConcepto from "../src/tools/modificar_concepto.js";
+import * as modificarStockConcepto from "../src/tools/modificar_stock_concepto.js";
 import * as quePuedoConsultar from "../src/tools/que_puedo_consultar.js";
 import * as registrarConsultaNoSoportada from "../src/tools/registrar_consulta_no_soportada.js";
 import * as diagnosticarOrden from "../src/tools/diagnosticar_orden.js";
@@ -268,12 +269,13 @@ describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
       assert.equal(registeredTools.has("emitir_factura_express"), false);
       assert.equal(registeredTools.has("obtener_factura_pdf"), false);
 
-      // Sí están las 14 de lectura, asistencia, modificación, órdenes y diagnóstico
+      // Sí están las 15 de lectura, asistencia, modificación, stock, órdenes y diagnóstico
       const expectedTools = [
         "que_puedo_consultar",
         "buscar_clientes",
         "buscar_productos",
         "modificar_concepto",
+        "modificar_stock_concepto",
         "buscar_proveedores",
         "listar_depositos",
         "listar_ventas",
@@ -289,7 +291,7 @@ describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
       for (const t of expectedTools) {
         assert.equal(registeredTools.has(t), true, `La tool ${t} debe estar registrada`);
       }
-      assert.equal(registeredTools.size, 14);
+      assert.equal(registeredTools.size, 15);
     });
 
     it("SYSTEM_INSTRUCTION instruye rechazar facturación indicando que no está habilitado actualmente (MEJ-10)", () => {
@@ -1751,6 +1753,193 @@ describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
           process.env.MODIFICAR_CONCEPTO_ALLOWED_ACCOUNTS = prevEnv;
         } else {
           delete process.env.MODIFICAR_CONCEPTO_ALLOWED_ACCOUNTS;
+        }
+      }
+    });
+  });
+
+  describe("modificar_stock_concepto (Reemplazo y Modificación de Stock por SKU o ID)", () => {
+    it("reemplaza stock de un producto por SKU con depósito y precio unitario opcional", async () => {
+      let postLlamado = null;
+      const mockConcepto = {
+        Id: 201,
+        Codigo: "SKU-PELOTA-01",
+        Nombre: "PELOTA DE FUTBOL",
+        Tipo: "P",
+        Estado: "A",
+      };
+
+      const mockClient = {
+        clientId: "empresa@test.com",
+        cache: new Map([["/inventarios/getStockBySKU?codigo=SKU-PELOTA-01", { dummy: 1 }]]),
+        get: async (endpoint, params) => {
+          if (endpoint === "/conceptos/getByCodigo" && params?.codigo === "SKU-PELOTA-01") {
+            return mockConcepto;
+          }
+          if (endpoint === "/inventarios/getDepositos") {
+            return [
+              { Id: 1, Nombre: "Depósito Central", Activo: true },
+              { Id: 2, Nombre: "Depósito Sucursal", Activo: true },
+            ];
+          }
+          if (endpoint === "/inventarios/getStockBySKU" && params?.codigo === "SKU-PELOTA-01") {
+            return {
+              stock: [
+                { Id: 2, StockActual: 8, StockReservado: 0 },
+              ],
+            };
+          }
+          return null;
+        },
+        post: async (endpoint, body, params) => {
+          postLlamado = { endpoint, body, params };
+          return { ok: true };
+        },
+      };
+
+      const res = await modificarStockConcepto.handler(
+        {
+          codigo: "SKU-PELOTA-01",
+          cantidad: 30,
+          id_deposito: 2,
+          precio_unitario: 12000,
+        },
+        mockClient
+      );
+
+      const parsed = JSON.parse(res.content[0].text);
+      assert.equal(parsed.datos.codigo, "SKU-PELOTA-01");
+      assert.equal(parsed.datos.id_deposito, 2);
+      assert.equal(parsed.datos.deposito, "Depósito Sucursal");
+      assert.equal(parsed.datos.stock_anterior, 8);
+      assert.equal(parsed.datos.stock_nuevo, 30);
+      assert.equal(parsed.datos.diferencia, 22);
+      assert.equal(parsed.datos.precio_unitario, 12000);
+
+      assert.equal(postLlamado.endpoint, "/inventarios/actualizar");
+      assert.equal(postLlamado.params.Codigo, "SKU-PELOTA-01");
+      assert.equal(postLlamado.params.Cantidad, 30);
+      assert.equal(postLlamado.params.IDDeposito, 2);
+      assert.equal(postLlamado.params.PrecioUnitario, 12000);
+      // Invalida caché
+      assert.equal(mockClient.cache.size, 0);
+    });
+
+    it("reemplaza stock de un producto por ID resolviendo depósito activo por defecto", async () => {
+      let postLlamado = null;
+      const mockConcepto = {
+        Id: 505,
+        Codigo: "SKU-GUANTES-01",
+        Nombre: "GUANTES DE ARQUERO",
+        Tipo: "P",
+        Estado: "A",
+      };
+
+      const mockClient = {
+        clientId: "empresa@test.com",
+        get: async (endpoint, params) => {
+          if (endpoint === "/conceptos" && params?.id === 505) {
+            return mockConcepto;
+          }
+          if (endpoint === "/inventarios/getDepositos") {
+            return [
+              { Id: 10, Nombre: "Depósito Mayorista", Activo: true },
+            ];
+          }
+          if (endpoint === "/inventarios/getStockBySKU") {
+            return {
+              stock: [
+                { Id: 10, StockActual: 15, StockReservado: 2 },
+              ],
+            };
+          }
+          return null;
+        },
+        post: async (endpoint, body, params) => {
+          postLlamado = { endpoint, body, params };
+          return { ok: true };
+        },
+      };
+
+      const res = await modificarStockConcepto.handler(
+        {
+          id: 505,
+          cantidad: 5,
+        },
+        mockClient
+      );
+
+      const parsed = JSON.parse(res.content[0].text);
+      assert.equal(parsed.datos.id, 505);
+      assert.equal(parsed.datos.codigo, "SKU-GUANTES-01");
+      assert.equal(parsed.datos.id_deposito, 10);
+      assert.equal(parsed.datos.deposito, "Depósito Mayorista");
+      assert.equal(parsed.datos.stock_anterior, 15);
+      assert.equal(parsed.datos.stock_nuevo, 5);
+      assert.equal(parsed.datos.diferencia, -10);
+
+      // Usa endpoint actualizar con Codigo resuelto
+      assert.equal(postLlamado.endpoint, "/inventarios/actualizar");
+      assert.equal(postLlamado.params.Codigo, "SKU-GUANTES-01");
+      assert.equal(postLlamado.params.Cantidad, 5);
+      assert.equal(postLlamado.params.IDDeposito, 10);
+    });
+
+    it("falla con mensaje descriptivo si no se envía ni codigo ni id", async () => {
+      const mockClient = { clientId: "test@test.com" };
+      await assert.rejects(
+        async () => {
+          await modificarStockConcepto.handler({ cantidad: 10 }, mockClient);
+        },
+        /Debe especificar el 'codigo' \(SKU\) o el 'id' numérico/
+      );
+    });
+
+    it("falla con mensaje amigable si el producto no existe en Contabilium", async () => {
+      const mockClient = {
+        clientId: "test@test.com",
+        get: async () => null,
+      };
+      await assert.rejects(
+        async () => {
+          await modificarStockConcepto.handler({ codigo: "SKU-FANTASMA", cantidad: 10 }, mockClient);
+        },
+        /No se encontró ningún producto con código SKU 'SKU-FANTASMA'/
+      );
+    });
+
+    it("respeta el control de acceso por cuenta cuando se define lista blanca", async () => {
+      const prevEnv = process.env.MODIFICAR_STOCK_ALLOWED_ACCOUNTS;
+      try {
+        process.env.MODIFICAR_STOCK_ALLOWED_ACCOUNTS = "autorizada@empresa.com";
+
+        // Cuenta no autorizada
+        const clientNoAuth = { clientId: "otra@empresa.com" };
+        await assert.rejects(
+          async () => {
+            await modificarStockConcepto.handler({ id: 10, cantidad: 5 }, clientNoAuth);
+          },
+          /no tiene permisos habilitados para modificar el stock de conceptos/
+        );
+
+        // Cuenta autorizada
+        const clientAuth = {
+          clientId: "autorizada@empresa.com",
+          get: async (endpoint) => {
+            if (endpoint === "/conceptos") return { Id: 10, Codigo: "SKU-10", Nombre: "Prod 10" };
+            if (endpoint === "/inventarios/getDepositos") return [{ Id: 1, Nombre: "Central", Activo: true }];
+            return null;
+          },
+          post: async () => ({ ok: true }),
+        };
+        const res = await modificarStockConcepto.handler({ id: 10, cantidad: 5 }, clientAuth);
+        const parsed = JSON.parse(res.content[0].text);
+        assert.equal(parsed.datos.stock_nuevo, 5);
+      } finally {
+        if (prevEnv !== undefined) {
+          process.env.MODIFICAR_STOCK_ALLOWED_ACCOUNTS = prevEnv;
+        } else {
+          delete process.env.MODIFICAR_STOCK_ALLOWED_ACCOUNTS;
         }
       }
     });
