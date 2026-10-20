@@ -38,6 +38,7 @@ Además, incorpora `registrar_consulta_no_soportada` como instrumento de Product
 | `listar_ventas` | Ventas | Lista comprobantes de venta emitidos en un período. Máximo 92 días por consulta. |
 | `resumen_ventas` | Ventas | Totaliza ventas por período, agrupables por día, semana, mes o cliente. Resta Notas de Crédito. |
 | `buscar_ordenes_venta` | Ventas / E-commerce | Busca órdenes de preventa o e-commerce por rango de fechas, filtro (número de orden externa) e ID de integración opcional. |
+| `enviar_venta` | Ventas / E-commerce | Envía (crea o actualiza) una orden de venta e-commerce en Contabilium (`/notificador/ecommerce`) con datos de cliente, ítems, envío y descuentos. |
 | `stock_por_deposito` | Stock | Consulta stock actual y reservado de un producto en un depósito específico o en todos. Calcula disponible real. |
 | `modificar_stock_concepto` | Stock / Edición | Modifica o reemplaza el stock físico (y opcionalmente precio) de un producto por SKU o por ID en un depósito. |
 | `cuentas_por_cobrar` | Deuda | Lista comprobantes con saldo pendiente de cobro y totaliza deuda agrupada por cliente. |

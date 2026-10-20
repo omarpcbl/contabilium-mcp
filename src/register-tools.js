@@ -11,6 +11,7 @@ import * as cuentasPorCobrar from "./tools/cuentas_por_cobrar.js";
 import * as quePuedoConsultar from "./tools/que_puedo_consultar.js";
 import * as diagnosticarOrden from "./tools/diagnosticar_orden.js";
 import * as buscarOrdenesVenta from "./tools/buscar_ordenes_venta.js";
+import * as enviarVenta from "./tools/enviar_venta.js";
 import * as crearBorradorFactura from "./tools/crear_borrador_factura.js";
 import * as autorizarFacturaElectronica from "./tools/autorizar_factura_electronica.js";
 import * as emitirFacturaExpress from "./tools/emitir_factura_express.js";
@@ -25,10 +26,10 @@ import { z } from "zod";
  * @param {import("./contabilium-client.js").ContabiliumClient} client 
  */
 export function registerContabiliumTools(server, client) {
-  // 0. que_puedo_consultar (MEJ-12: Onboarding interactivo y capacidades)
+  // 0. que_puedo_consultar (MEJ-12: Onboarding interactivo, capacidades y explicación de tools)
   server.tool(
     "que_puedo_consultar",
-    "Guía de asistencia y bienvenida: explica qué módulos y consultas están disponibles (ventas, stock, cobranzas), sus límites operacionales y ofrece preguntas sugeridas listas para ejecutar.",
+    "Guía de asistencia y documentación interactiva del MCP: explica qué módulos y consultas están disponibles (ventas, stock, cobranzas, diagnóstico) y, si se consulta por una tool específica (parámetro 'tool'), detalla cómo funciona internamente, qué parámetros obligatorios y opcionales espera y ejemplos de uso.",
     quePuedoConsultar.schema,
     async (args) => {
       try {
@@ -240,6 +241,23 @@ export function registerContabiliumTools(server, client) {
       } catch (err) {
         return {
           content: [{ type: "text", text: JSON.stringify({ error: err.message, datos: null, resumen: "Error al buscar órdenes de venta", advertencias: [err.message], truncado: false }, null, 2) }],
+          isError: true,
+        };
+      }
+    }
+  );
+
+  // OP-10: enviar_venta (Envío y actualización de órdenes de venta e-commerce vía /notificador/ecommerce)
+  server.tool(
+    "enviar_venta",
+    "Envía (crea o actualiza) una orden de venta e-commerce en Contabilium mediante POST /notificador/ecommerce sin emitir factura fiscal. Espera obligatoriamente: 'id_venta_integracion' (nro de orden), 'condicion_venta' (validada contra la cuenta), 'cliente' (con 'nombre' obligatorio y documento fiscal validado) e 'items' (array con 'codigo'/SKU, 'cantidad' y 'precio_unitario' sin IVA). Opcionalmente acepta 'deposito' por nombre (se resuelve automáticamente a IDInventario en /inventarios/getDepositos; si se omite, Contabilium usa el depósito de reserva predeterminado de la integración), 'id_deposito', 'id_integracion' (se autodescubre si hay 1 sola activa), 'estado_integracion', 'costo_envio' y 'descuento_general'.",
+    enviarVenta.schema,
+    async (args) => {
+      try {
+        return await enviarVenta.handler(args, client);
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ error: err.message, datos: null, resumen: "Error al enviar la orden de venta", advertencias: [err.message], truncado: false }, null, 2) }],
           isError: true,
         };
       }

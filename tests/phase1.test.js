@@ -10,6 +10,7 @@ import * as quePuedoConsultar from "../src/tools/que_puedo_consultar.js";
 import * as registrarConsultaNoSoportada from "../src/tools/registrar_consulta_no_soportada.js";
 import * as diagnosticarOrden from "../src/tools/diagnosticar_orden.js";
 import * as buscarOrdenesVenta from "../src/tools/buscar_ordenes_venta.js";
+import * as enviarVenta from "../src/tools/enviar_venta.js";
 import { registerContabiliumTools } from "../src/register-tools.js";
 import { classifyFiscalInvoice, formatIsoWeekLabel, formatYearMonthLabel, getTodayString, renderProgressBar, validateTaxId } from "../src/utils.js";
 import { SYSTEM_INSTRUCTION } from "../src/instructions.js";
@@ -269,7 +270,7 @@ describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
       assert.equal(registeredTools.has("emitir_factura_express"), false);
       assert.equal(registeredTools.has("obtener_factura_pdf"), false);
 
-      // Sí están las 15 de lectura, asistencia, modificación, stock, órdenes y diagnóstico
+      // Sí están las 16 de lectura, asistencia, modificación, stock, órdenes y diagnóstico
       const expectedTools = [
         "que_puedo_consultar",
         "buscar_clientes",
@@ -284,6 +285,7 @@ describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
         "cuentas_por_cobrar",
         "diagnosticar_orden",
         "buscar_ordenes_venta",
+        "enviar_venta",
         "registrar_consulta_no_soportada",
         "contabilium_auth_status",
       ];
@@ -291,7 +293,7 @@ describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
       for (const t of expectedTools) {
         assert.equal(registeredTools.has(t), true, `La tool ${t} debe estar registrada`);
       }
-      assert.equal(registeredTools.size, 15);
+      assert.equal(registeredTools.size, 16);
     });
 
     it("SYSTEM_INSTRUCTION instruye rechazar facturación indicando que no está habilitado actualmente (MEJ-10)", () => {
@@ -1944,5 +1946,318 @@ describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
       }
     });
   });
+
+  describe("enviar_venta (Envío y actualización de órdenes de venta e-commerce vía /notificador/ecommerce)", () => {
+    it("envía una orden de venta completa, normaliza condición de venta, agrega costo_envio y descuento_general e invalida caché", async () => {
+      let postLlamado = null;
+      const mockClient = {
+        clientId: "tienda@empresa.com",
+        country: "AR",
+        cache: new Map([["/ordenesVenta/search?page=1", { dummy: 1 }]]),
+        get: async (endpoint) => {
+          if (endpoint === "/usuarios/condicionesVenta") {
+            return [{ Nombre: "MercadoPago" }, { Nombre: "Contado" }];
+          }
+          return [];
+        },
+        post: async (endpoint, body) => {
+          postLlamado = { endpoint, body };
+          return "48834596";
+        },
+      };
+
+      const res = await enviarVenta.handler(
+        {
+          id_venta_integracion: "FEN-10500",
+          id_integracion: 27341,
+          estado_integracion: "Aceptado",
+          condicion_venta: "mercado pago", // Con espacio y minúsculas -> debe normalizarse a 'MercadoPago'
+          fecha_emision: "2026-10-20",
+          observaciones: "Pedido web #10500",
+          cliente: {
+            nombre: "Juan",
+            apellido: "Pérez",
+            documento: "20-12345678-6", // 11 dígitos -> infiere CUIT
+            email: "juan@ejemplo.com",
+            telefono: "1122334455",
+            direccion: "Av. Corrientes 1234",
+            ciudad: "CABA",
+            provincia: "Buenos Aires",
+            codigo_postal: "1043",
+          },
+          items: [
+            {
+              codigo: "420",
+              concepto: "Producto de ejemplo",
+              cantidad: 2,
+              precio_unitario: 15000,
+              bonificacion: 0,
+              iva: 21,
+            },
+          ],
+          costo_envio: 1500,
+          descuento_general: 1000,
+        },
+        mockClient
+      );
+
+      const parsed = JSON.parse(res.content[0].text);
+      assert.equal(parsed.datos.id_orden, 48834596);
+      assert.equal(parsed.datos.id_venta_integracion, "FEN-10500");
+      assert.equal(parsed.datos.id_integracion, 27341);
+      assert.equal(parsed.datos.condicion_venta, "MercadoPago");
+      assert.equal(parsed.datos.cliente.tipo_documento, "CUIT");
+      assert.equal(parsed.datos.cliente.documento, "20123456786");
+      assert.equal(parsed.datos.items_cantidad, 3);
+      assert.equal(parsed.datos.total_estimado, 30500); // (2 * 15000) + 1500 - 1000
+
+      assert.equal(postLlamado.endpoint, "/notificador/ecommerce");
+      assert.equal(postLlamado.body.IDVentaIntegracion, "FEN-10500");
+      assert.equal(postLlamado.body.IDIntegracion, 27341);
+      assert.equal(postLlamado.body.CondicionVenta, "MercadoPago");
+      assert.equal(postLlamado.body.Items.length, 3);
+      assert.equal(postLlamado.body.Items[1].Codigo, "CDE");
+      assert.equal(postLlamado.body.Items[1].Concepto, "Envío");
+      assert.equal(postLlamado.body.Items[2].Concepto, "Descuento general");
+      assert.equal(postLlamado.body.Items[2].PrecioUnitario, -1000);
+      assert.equal(mockClient.cache.size, 0);
+    });
+
+    it("normaliza automáticamente la frase reservada 'Costo de envío' a 'Envío'", async () => {
+      let postBody = null;
+      const mockClient = {
+        country: "AR",
+        get: async () => [],
+        post: async (_ep, body) => {
+          postBody = body;
+          return 99001;
+        },
+      };
+
+      const res = await enviarVenta.handler(
+        {
+          id_venta_integracion: 88,
+          id_integracion: 100,
+          cliente: { nombre: "Maria", apellido: "Gomez", documento: "35123456" },
+          items: [
+            { codigo: "P1", concepto: "Remera", cantidad: 1, precio_unitario: 10000 },
+            { codigo: "CDE", concepto: "Costo de envío", cantidad: 1, precio_unitario: 500 },
+          ],
+        },
+        mockClient
+      );
+
+      const parsed = JSON.parse(res.content[0].text);
+      assert.equal(postBody.Items[1].Concepto, "Envío");
+      assert.ok(parsed.advertencias.some((a) => a.includes("frase reservada")));
+    });
+
+    it("lanza error descriptivo cuando /notificador/ecommerce devuelve código -3 o -1", async () => {
+      const mockClientErr3 = {
+        get: async () => [],
+        post: async () => "-3",
+      };
+
+      await assert.rejects(
+        async () => {
+          await enviarVenta.handler(
+            {
+              id_venta_integracion: 1,
+              id_integracion: 999999,
+              cliente: { nombre: "Test" },
+              items: [{ codigo: "1", concepto: "Item", cantidad: 1, precio_unitario: 100 }],
+            },
+            mockClientErr3
+          );
+        },
+        /Código -3.*IDIntegracion/
+      );
+
+      const mockClientErr1 = {
+        get: async () => [],
+        post: async () => -1,
+      };
+
+      await assert.rejects(
+        async () => {
+          await enviarVenta.handler(
+            {
+              id_venta_integracion: 1,
+              id_integracion: 27341,
+              cliente: { nombre: "Test" },
+              items: [{ codigo: "1", concepto: "Item", cantidad: 1, precio_unitario: 100 }],
+            },
+            mockClientErr1
+          );
+        },
+        /Código -1/
+      );
+    });
+
+    it("autodetecta id_integracion cuando la cuenta tiene una única integración activa", async () => {
+      let postBody = null;
+      const mockClient = {
+        _knownIntegrations: new Set([27341]),
+        get: async () => [],
+        post: async (_ep, body) => {
+          postBody = body;
+          return 55555;
+        },
+      };
+
+      const res = await enviarVenta.handler(
+        {
+          id_venta_integracion: "AUTO-1",
+          cliente: { nombre: "Carlos" },
+          items: [{ codigo: "SKU1", concepto: "Prod 1", cantidad: 1, precio_unitario: 5000 }],
+        },
+        mockClient
+      );
+
+      const parsed = JSON.parse(res.content[0].text);
+      assert.equal(parsed.datos.id_integracion, 27341);
+      assert.equal(postBody.IDIntegracion, 27341);
+      assert.equal(postBody.IDInventario, undefined);
+      assert.equal(parsed.datos.deposito.origen, "configuracion_integracion");
+    });
+
+    it("resuelve el depósito por nombre (deposito: 'Secundario') e inyecta IDInventario en el payload", async () => {
+      let postBody = null;
+      const mockClient = {
+        get: async (endpoint) => {
+          if (endpoint === "/inventarios/getDepositos") {
+            return [
+              { Id: 31293, Nombre: "Depósito Principal", Activo: true },
+              { Id: 40549, Nombre: "Depósito Secundario Norte", Activo: true },
+            ];
+          }
+          return [];
+        },
+        post: async (_ep, body) => {
+          postBody = body;
+          return 77701;
+        },
+      };
+
+      const res = await enviarVenta.handler(
+        {
+          id_venta_integracion: "ORD-DEP-1",
+          id_integracion: 27341,
+          deposito: "secundario", // Búsqueda parcial sin tildes/mayúsculas
+          cliente: { nombre: "Lucía" },
+          items: [{ codigo: "SKU-A", concepto: "Producto A", cantidad: 1, precio_unitario: 12000 }],
+        },
+        mockClient
+      );
+
+      const parsed = JSON.parse(res.content[0].text);
+      assert.equal(postBody.IDInventario, 40549);
+      assert.equal(parsed.datos.deposito.id, 40549);
+      assert.equal(parsed.datos.deposito.nombre, "Depósito Secundario Norte");
+      assert.equal(parsed.datos.deposito.origen, "indicado_en_orden");
+    });
+
+    it("falla con mensaje claro listando los depósitos disponibles si el nombre de depósito no existe", async () => {
+      const mockClient = {
+        get: async (endpoint) => {
+          if (endpoint === "/inventarios/getDepositos") {
+            return [
+              { Id: 31293, Nombre: "Principal", Activo: true },
+              { Id: 40549, Nombre: "Sucursal Sur", Activo: true },
+            ];
+          }
+          return [];
+        },
+        post: async () => 1,
+      };
+
+      await assert.rejects(
+        async () => {
+          await enviarVenta.handler(
+            {
+              id_venta_integracion: "ORD-DEP-ERR",
+              id_integracion: 27341,
+              deposito: "Deposito Fantasma",
+              cliente: { nombre: "Lucía" },
+              items: [{ codigo: "SKU-A", concepto: "Producto A", cantidad: 1, precio_unitario: 12000 }],
+            },
+            mockClient
+          );
+        },
+        /No se encontró ningún depósito en la cuenta que coincida con 'Deposito Fantasma'\. Depósitos disponibles: 'Principal' \(ID 31293\), 'Sucursal Sur' \(ID 40549\)/
+      );
+    });
+
+    it("respeta el control de acceso por cuenta cuando se configura ENVIAR_VENTA_ALLOWED_ACCOUNTS", async () => {
+      const prevEnv = process.env.ENVIAR_VENTA_ALLOWED_ACCOUNTS;
+      try {
+        process.env.ENVIAR_VENTA_ALLOWED_ACCOUNTS = "autorizada@empresa.com";
+
+        const clientNoAuth = { clientId: "bloqueada@empresa.com" };
+        await assert.rejects(
+          async () => {
+            await enviarVenta.handler(
+              {
+                id_venta_integracion: 10,
+                id_integracion: 1,
+                cliente: { nombre: "Test" },
+                items: [{ codigo: "1", concepto: "Item", cantidad: 1, precio_unitario: 100 }],
+              },
+              clientNoAuth
+            );
+          },
+          /no tiene permisos habilitados para enviar órdenes de venta/
+        );
+      } finally {
+        if (prevEnv !== undefined) {
+          process.env.ENVIAR_VENTA_ALLOWED_ACCOUNTS = prevEnv;
+        } else {
+          delete process.env.ENVIAR_VENTA_ALLOWED_ACCOUNTS;
+        }
+      }
+    });
+
+    it("que_puedo_consultar explica cómo funciona enviar_venta y qué parámetros espera cuando se consulta por la tool", async () => {
+      const mockClient = {
+        ambiente: "QA / Pruebas",
+        get: async (path) => {
+          if (path === "/usuarios/obtenerinfo") {
+            return { RazonSocial: "Demo S.A.", CUIT: "30712345678" };
+          }
+          if (path === "/inventarios/getDepositos") {
+            return [
+              { Id: 31293, Nombre: "Depósito Central", Activo: true },
+              { Id: 40549, Nombre: "Sucursal Norte", Activo: true },
+            ];
+          }
+          return null;
+        },
+      };
+
+      const res = await quePuedoConsultar.handler({ tool: "enviar_venta" }, mockClient);
+      const parsed = JSON.parse(res.content[0].text);
+
+      assert.ok(parsed.datos.detalle_tool_consultada);
+      assert.equal(parsed.datos.detalle_tool_consultada.nombre, "enviar_venta");
+      assert.ok(Array.isArray(parsed.datos.detalle_tool_consultada.como_funciona));
+      assert.ok(
+        parsed.datos.detalle_tool_consultada.como_funciona.some((line) =>
+          line.includes("IDInventario") && line.includes("deposito")
+        )
+      );
+      assert.ok(parsed.datos.detalle_tool_consultada.que_espera.parametros_obligatorios.id_venta_integracion);
+      assert.ok(parsed.datos.detalle_tool_consultada.que_espera.parametros_obligatorios.condicion_venta);
+      assert.ok(parsed.datos.detalle_tool_consultada.que_espera.parametros_obligatorios.cliente);
+      assert.ok(parsed.datos.detalle_tool_consultada.que_espera.parametros_obligatorios.items);
+      assert.ok(parsed.datos.detalle_tool_consultada.que_espera.parametros_opcionales.deposito);
+      assert.ok(parsed.datos.detalle_tool_consultada.que_espera.parametros_opcionales.id_deposito);
+      assert.deepEqual(parsed.datos.detalle_tool_consultada.depositos_activos_en_cuenta, [
+        "Depósito Central",
+        "Sucursal Norte",
+      ]);
+      assert.match(parsed.resumen, /Guía detallada de la tool 'enviar_venta'/);
+    });
+  });
+
 
 });
