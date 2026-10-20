@@ -113,3 +113,57 @@ Ideal para Antigravity, Claude Desktop o Cursor:
   }
 }
 ```
+
+---
+
+## 🧪 Cómo Probar en Local Apuntando a QA / Staging
+
+Haber desactivado la ruta pública `/qa` en el servidor web remoto **no impide probar contra QA**. Podés apuntar el MCP al entorno de QA de forma 100% local y segura (sin exponer rutas en internet) de dos maneras:
+
+### Alternativa 1: Por STDIO en tu IDE / Cliente MCP (Recomendado)
+Podés registrar una instancia local dedicada a QA (e incluso tener Producción y QA al mismo tiempo en Antigravity, Cursor o Claude Desktop) sobrescribiendo `CONTABILIUM_BASE_URL` y `MCP_ENVIRONMENT`:
+
+```json
+{
+  "mcpServers": {
+    "contabilium-local-qa": {
+      "command": "node",
+      "args": ["C:\\cbl\\contabilium-mcp\\index.js"],
+      "env": {
+        "CONTABILIUM_CLIENT_ID": "tu_email_qa@contabilium.com",
+        "CONTABILIUM_CLIENT_SECRET": "tu_api_key_qa",
+        "CONTABILIUM_COUNTRY": "AR",
+        "CONTABILIUM_BASE_URL": "https://rest-qa.contabilium.com",
+        "MCP_ENVIRONMENT": "qa",
+        "CONTABILIUM_IGNORE_SSL": "true",
+        "NOT_ALLOWED_TOOLS": ""
+      }
+    }
+  }
+}
+```
+
+> **Detalles útiles para QA:**
+> - **`CONTABILIUM_BASE_URL`**: Apunta todas las llamadas OAuth2 (`/token`) y de API (`/api/...`, `/notificador/ecommerce`) al servidor de QA/Staging que indiques.
+> - **`MCP_ENVIRONMENT: "qa"`**: Hace que el cliente y la tool `contabilium_auth_status` reporten explícitamente `"QA / Pruebas (Ambiente de Testing - Sin validez fiscal ante AFIP)"` (`validezFiscalReal: false`). Además, el cliente detecta automáticamente URLs que contengan `qa`, `staging`, `dev`, `sandbox` o `test`.
+> - **`CONTABILIUM_IGNORE_SSL: "true"`**: Útil si el entorno interno de QA (vía VPN) utiliza certificados SSL autofirmados.
+> - **`ENABLE_BILLING_TOOLS: "true"`** *(Opcional)*: Si en QA querés probar también las tools de emisión electrónica (`autorizar_factura_electronica`, `emitir_factura_express`), podés agregar `"ENABLE_BILLING_TOOLS": "true"` únicamente en tu configuración local de QA.
+
+### Alternativa 2: Servidor HTTP Local (`localhost:3000`) apuntando a QA
+Si querés probar el portal web y el transporte Streamable HTTP (`/mcp`) localmente contra QA:
+
+1. Editá tu archivo `.env` local (que está ignorado por Git):
+   ```env
+   CONTABILIUM_CLIENT_ID=tu_email_qa@contabilium.com
+   CONTABILIUM_CLIENT_SECRET=tu_api_key_qa
+   CONTABILIUM_COUNTRY=AR
+   CONTABILIUM_BASE_URL=https://rest-qa.contabilium.com
+   MCP_ENVIRONMENT=qa
+   CONTABILIUM_IGNORE_SSL=true
+   ```
+2. Ejecutá el servidor en tu máquina:
+   ```bash
+   npm start
+   ```
+3. Conectá tu cliente MCP a `http://localhost:3000/mcp` (o abrí `http://localhost:3000` en el navegador para generar el token cifrado local).
+4. Para verificar que estás conectado a QA, ejecutá la tool `contabilium_auth_status` y comprobá que devuelva `"validezFiscalReal": false` y `"ambiente": "QA / Pruebas..."`.
