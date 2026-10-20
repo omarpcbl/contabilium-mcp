@@ -1,71 +1,98 @@
 # Contabilium MCP Server
 
-Servidor oficial **Model Context Protocol (MCP)** para conectar asistentes de IA (Claude, Antigravity, Cursor, etc.) con la **API de Contabilium** de forma 100% segura y bajo una arquitectura de solo lectura.
+Servidor oficial **Model Context Protocol (MCP)** para conectar asistentes de IA (Claude, Antigravity, Cursor, etc.) con la **API de Contabilium** de forma segura, con herramientas de analítica de negocio, gestión de órdenes/catálogo y **simulación asistida para integradores de la API**.
 
 ---
 
-## 🎯 Contexto y Filosofía del MVP (Solo Lectura)
+## 🎯 Contexto y Capacidades Principales
 
-Este servidor expone **8 tools de solo lectura** sobre endpoints existentes de la API REST de Contabilium. No abre endpoints nuevos en el backend de Contabilium: su objetivo es validar el valor de negocio respondiendo a tres flujos críticos:
-1. **¿Cómo vengo vendiendo?** (`listar_ventas`, `resumen_ventas`)
-2. **¿Qué stock tengo y dónde?** (`buscar_productos`, `listar_depositos`, `stock_por_deposito`)
+Este servidor MCP está diseñado tanto para **usuarios de gestión** como para **desarrolladores e integradores** que están dando sus primeros pasos con la API REST de Contabilium:
+
+1. **¿Cómo vengo vendiendo?** (`listar_ventas`, `resumen_ventas`, `buscar_ordenes_venta`, `enviar_venta`)
+2. **¿Qué stock tengo y cómo actualizo mi catálogo?** (`buscar_productos`, `listar_depositos`, `stock_por_deposito`, `modificar_concepto`, `modificar_stock_concepto`)
 3. **¿Quién me debe?** (`buscar_clientes`, `cuentas_por_cobrar`)
-
-Además, incorpora `registrar_consulta_no_soportada` como instrumento de Product Discovery para capturar las intenciones de usuario no resueltas.
+4. **Onboarding, Simulación y Diagnóstico para Integradores API:**
+   - `que_puedo_consultar`: Guía interactiva que explica cómo funciona cada tool internamente, qué parámetros espera y ejemplos de uso.
+   - `emular_facturacion`: **Simulador Dry-Run (100% lectura, sin impacto fiscal)** que valida cliente, algoritmo de CUIT/DNI/RUT, letra del comprobante según la Matriz Oficial de AFIP (`FA`/`FB`/`FC`), punto de venta, condición de venta (`Error C2`), SKUs y stock, devolviendo los **contratos HTTP y payloads JSON exactos listos para copiar y pegar**.
+   - `crear_borrador_factura`: Guarda un borrador de factura en Contabilium (`POST /api/comprobantes/crear`) sin solicitar CAE ante AFIP/ARCA.
+   - `diagnosticar_orden`: Audita por qué una orden de e-commerce no facturó o fue rechazada (`C1` a `C15`).
 
 ---
 
 ## 🔒 Arquitectura de Seguridad y Privacidad
 
-1. **Sin escritura:** El servidor únicamente ejecuta llamadas `GET`. Ninguna tool crea, modifica ni elimina registros.
-2. **Cero fuga de credenciales:** Tus credenciales (`client_id` y `client_secret`) nunca llegan al LLM. En despliegues remotos se transmiten cifradas con **AES-256-GCM** en el parámetro `?auth=...`.
-3. **Gestión autónoma de OAuth2:** Renovación automática de tokens Bearer antes de expirar y reintento transparente ante respuestas 401.
-4. **Rate Limiting Defensivo:** Token bucket integrado (2 req/s, máx 25 req / 10s) con pausas automáticas y reintentos ante 429.
-5. **Normalización Monetaria:** Convierte formatos de moneda argentina (`"40.460,11"`) a números de coma flotante.
-6. **Tope de Paginación:** Hasta 20 páginas (1.000 registros) marcando `truncado: true` cuando se alcanza el límite.
+1. **Protección Fiscal por Defecto:** Las herramientas que autorizan comprobantes reales con CAE ante AFIP/ARCA (`autorizar_factura_electronica`, `emitir_factura_express`, `obtener_factura_pdf`) están **bloqueadas por defecto**. En su lugar se disponibilizan `emular_facturacion` (Dry-Run) y `crear_borrador_factura` (solo borrador sin CAE).
+2. **Interruptor por Tool (`NOT_ALLOWED_TOOLS`):** Permite apagar cualquier tool de forma individual mediante variables de entorno sin tocar código.
+3. **Cero fuga de credenciales:** Tus credenciales (`client_id` y `client_secret`) nunca llegan al LLM. En despliegues remotos se transmiten cifradas con **AES-256-GCM** en el parámetro `?auth=...`.
+4. **Gestión autónoma de OAuth2:** Renovación automática de tokens Bearer antes de expirar y reintento transparente ante respuestas 401.
+5. **Rate Limiting Defensivo:** Token bucket integrado (2 req/s, máx 25 req / 10s) con pausas automáticas y reintentos ante 429.
+6. **Normalización Monetaria y Paginación por Tramos:** Convierte formatos de moneda latina (`"40.460,11"`) y particiona rangos largos para evitar truncamientos por cotizaciones.
 
 ---
 
-## 🛠️ Catálogo de Tools (8 Oficiales + 1 Diagnóstico)
+## 🛠️ Catálogo de Tools
+
+### Tools Habilitadas por Defecto (18)
 
 | Tool | Flujo | Descripción |
 |---|---|---|
-| `buscar_clientes` | Catálogo | Busca clientes por nombre, razón social o CUIT. Devuelve IDs necesarios para filtrar ventas y deudas. |
-| `buscar_productos` | Catálogo | Busca productos por SKU o nombre. Devuelve código, descripción, precio de venta, stock total, costo_interno y proveedor. |
-| `modificar_concepto` | Catálogo / Edición | Modifica datos de un concepto existente (precio, costo interno, IVA, nombre, descripción, estado activo/inactivo, rubro, código de barras). No crea nuevos. |
+| `que_puedo_consultar` | Onboarding / Guía | Explica los módulos disponibles y detalla cómo funciona internamente cualquier tool (parámetros obligatorios/opcionales y ejemplos). |
+| `buscar_clientes` | Catálogo / Cobranzas | Busca clientes por nombre, razón social o CUIT. Devuelve IDs necesarios para filtrar ventas y deudas. |
+| `buscar_productos` | Catálogo | Busca productos por SKU o nombre. Devuelve código, descripción, precio de venta, stock total, `costo_interno` y proveedor. |
+| `modificar_concepto` | Catálogo / Edición | Modifica datos de un concepto existente (precio, costo interno, IVA, nombre, descripción, estado activo/inactivo, código de barras, SKU). No crea nuevos. |
 | `buscar_proveedores` | Compras | Busca proveedores por nombre, razón social o CUIT con datos de contacto para reposición. |
-| `listar_depositos` | Catálogo | Lista los depósitos configurados con sus IDs. Usar antes de consultar stock por depósito. |
-| `listar_ventas` | Ventas | Lista comprobantes de venta emitidos en un período. Máximo 92 días por consulta. |
-| `resumen_ventas` | Ventas | Totaliza ventas por período, agrupables por día, semana, mes o cliente. Resta Notas de Crédito. |
-| `buscar_ordenes_venta` | Ventas / E-commerce | Busca órdenes de preventa o e-commerce por rango de fechas, filtro (número de orden externa) e ID de integración opcional. |
-| `enviar_venta` | Ventas / E-commerce | Envía (crea o actualiza) una orden de venta e-commerce en Contabilium (`/notificador/ecommerce`) con datos de cliente, ítems, envío y descuentos. |
-| `stock_por_deposito` | Stock | Consulta stock actual y reservado de un producto en un depósito específico o en todos. Calcula disponible real. |
+| `listar_depositos` | Stock | Lista los depósitos configurados con sus IDs. |
+| `stock_por_deposito` | Stock | Consulta stock físico, reservado y disponible real de un producto en un depósito específico o en todos. |
 | `modificar_stock_concepto` | Stock / Edición | Modifica o reemplaza el stock físico (y opcionalmente precio) de un producto por SKU o por ID en un depósito. |
-| `cuentas_por_cobrar` | Deuda | Lista comprobantes con saldo pendiente de cobro y totaliza deuda agrupada por cliente. |
-| `diagnosticar_orden` | Diagnóstico | Diagnóstico automatizado de órdenes e integraciones e-commerce (detecta duplicados, valida CUIT/RUT, stock y causa raíz). |
-| `crear_borrador_factura` | Facturación | **Paso 1 seguro:** Guarda un borrador en Contabilium con precálculo fiscal AFIP y devuelve preview para confirmación humana. |
-| `autorizar_factura_electronica` | Facturación | **Paso 2 seguro:** Envía el borrador confirmado a AFIP/SII para obtener CAE/Folio y link PDF. |
-| `emitir_factura_express` | Facturación | Emisión directa en 1 solo paso (crea, cobra y emite CAE). Solo si el usuario lo solicita explícitamente. |
-| `obtener_factura_pdf` | Facturación | Obtiene el estado fiscal y la URL de visualización/descarga del PDF oficial. |
+| `listar_ventas` | Ventas | Lista comprobantes fiscales de venta emitidos en un período (máximo 92 días por consulta). |
+| `resumen_ventas` | Ventas | Totaliza ventas netas por período, agrupables por día, semana, mes, cliente u origen. Resta Notas de Crédito y excluye cotizaciones. |
+| `buscar_ordenes_venta` | Ventas / E-commerce | Busca órdenes de preventa o e-commerce por rango de fechas, filtro (número de orden externa) e ID de integración opcional. |
+| `enviar_venta` | Ventas / E-commerce | Envía (crea o actualiza) una orden de venta e-commerce en Contabilium (`POST /notificador/ecommerce`), resolviendo el depósito por nombre (`deposito`) o ID (`id_deposito`). |
+| `emular_facturacion` | Facturación (Dry-Run) | **Simulador 100% libre de riesgo fiscal:** valida cliente, CUIT, Matriz AFIP (`FA`/`FB`/`FC`), punto de venta, condición de venta, SKUs y stock, y genera los payloads JSON exactos para integrar con la API. |
+| `crear_borrador_factura` | Facturación (Borrador) | Guarda un borrador en Contabilium (`POST /api/comprobantes/crear`) con precálculo fiscal AFIP sin pedir CAE a AFIP. |
+| `cuentas_por_cobrar` | Deuda | Lista comprobantes pendientes de cobro y genera el reporte de antigüedad de deuda (Aging: 0-30, 31-60, 61-90, >90 días). |
+| `diagnosticar_orden` | Diagnóstico | Diagnóstico automatizado de órdenes e integraciones e-commerce (detecta duplicados, valida CUIT/RUT, stock y causa raíz C1-C15). |
 | `registrar_consulta_no_soportada` | Discovery | Registra internamente consultas fuera de alcance para priorizar el backlog de producto. |
-| `contabilium_auth_status` | Diagnóstico | Valida conectividad y reporta Razón Social, CUIT y estado del token. |
+| `contabilium_auth_status` | Diagnóstico | Valida conectividad y reporta Razón Social, CUIT, ambiente y estado del token. |
+
+### Tools de Emisión Fiscal Directa (Bloqueadas por defecto)
+
+| Tool | Flujo | Estado por defecto |
+|---|---|---|
+| `autorizar_factura_electronica` | Facturación AFIP/SII | Bloqueada (requiere `ENABLE_BILLING_TOOLS=true`) |
+| `emitir_factura_express` | Facturación AFIP/SII | Bloqueada (requiere `ENABLE_BILLING_TOOLS=true`) |
+| `obtener_factura_pdf` | Facturación AFIP/SII | Bloqueada (requiere `ENABLE_BILLING_TOOLS=true`) |
+
+---
+
+## ⚙️ Cómo Apagar o Prender Tools (`NOT_ALLOWED_TOOLS`)
+
+Todas las tools están habilitadas por defecto (salvo las 3 de emisión fiscal directa ante AFIP). Si considerás riesgosa alguna tool en un entorno determinado, podés **apagarla individualmente** agregándola a la variable de entorno `NOT_ALLOWED_TOOLS` (separadas por coma) en tu `.env` o en el panel de **Vercel** (`Settings > Environment Variables`):
+
+```env
+# Ejemplo: apagar modificación de stock, modificación de conceptos y creación de borradores
+NOT_ALLOWED_TOOLS=autorizar_factura_electronica,emitir_factura_express,obtener_factura_pdf,modificar_stock_concepto,modificar_concepto,crear_borrador_factura
+```
+
+Cuando una tool se incluye en `NOT_ALLOWED_TOOLS`:
+1. **No se registra en el servidor MCP**, por lo que el LLM ni siquiera la ve en su listado de herramientas.
+2. **Se oculta automáticamente del catálogo activo** en `que_puedo_consultar`.
 
 ---
 
 ## 🚀 Despliegue y Conexión
 
-### Opción A: Claude (Streamable HTTP / SSE Remoto)
+### Opción A: Claude / Clientes Remotos (Streamable HTTP / SSE)
 El servidor incluye una interfaz web integrada en `/` para generar tu URL segura:
 1. Despliega el proyecto en **Vercel** o **Render**.
 2. Ingresa a la URL de tu despliegue (ej. `https://tu-servidor.vercel.app/`).
-3. Ingresa tu Email de API y tu API Key de Contabilium.
+3. Ingresa la clave de acceso del portal (`PORTAL_ACCESS_SECRET`), tu Email de API y tu API Key de Contabilium.
 4. Copia la URL generada:
    - **Streamable HTTP (Estándar Claude):** `https://tu-servidor.vercel.app/mcp?auth=<TOKEN_CIFRADO>`
 5. En Claude, ve a **Settings > Connectors > Add custom connector**:
    - **Name:** Contabilium
    - **MCP server URL:** Pega la URL generada
    - **Authentication:** `No sign-in (Detected)`
-6. ¡Listo! Claude se conectará a tu cuenta de Contabilium con las 8 herramientas disponibles.
 
 ### Opción B: Local (STDIO)
 Ideal para Antigravity, Claude Desktop o Cursor:
@@ -79,93 +106,10 @@ Ideal para Antigravity, Claude Desktop o Cursor:
         "CONTABILIUM_CLIENT_ID": "tu_email@empresa.com",
         "CONTABILIUM_CLIENT_SECRET": "tu_api_key_privada",
         "CONTABILIUM_COUNTRY": "AR",
-        "CONTABILIUM_BASE_URL": "https://rest.contabilium.com"
+        "CONTABILIUM_BASE_URL": "https://rest.contabilium.com",
+        "NOT_ALLOWED_TOOLS": "autorizar_factura_electronica,emitir_factura_express,obtener_factura_pdf"
       }
     }
   }
 }
 ```
-
----
-
-## ⚙️ Configuración Avanzada y Variables de Entorno en Vercel
-
-Configura estas variables en el panel de **Vercel** (`Proyecto > Settings > Environment Variables`) o en tu archivo local `.env`:
-
-### 1. URL Base Configurable (`CONTABILIUM_BASE_URL`)
-
-Permite apuntar todas las llamadas a la API de Contabilium hacia un endpoint personalizado (por ejemplo: proxies corporativos, API gateways, servidores mock o entornos de prueba).
-
-- **Variable:** `CONTABILIUM_BASE_URL`
-- **Ejemplo:** `https://rest.contabilium.com` o `https://tu-proxy-api.empresa.com`
-- **Comportamiento:**
-  - Si está configurada, sobreescribe automáticamente las URLs de país predeterminadas (`https://rest.contabilium.com`, `https://rest.contabilium.cl`, `https://rest.contabilium.com.uy`).
-  - Aplica tanto a la validación de credenciales al generar tokens como a todas las consultas de herramientas del cliente HTTP.
-  - Si se omite, el servidor selecciona la URL oficial de Contabilium correspondiente al país (`CONTABILIUM_COUNTRY` o selección del usuario en el formulario).
-
----
-
-### 2. Manejo de MCP Paralelo / QA (Oculto a Usuarios Finales)
-
-El servidor incluye un **canal MCP secundario e independiente**, diseñado específicamente para pruebas de QA, staging o perfiles de permisos diferenciados.
-
-> 🔒 **Privacidad Total:** La interfaz pública principal (`/`) no menciona ni enlaza este canal en ningún momento. Los usuarios finales solo tienen acceso a su conector habitual de producción.
-
-#### Variables de Entorno para el Entorno Paralelo:
-
-| Variable | Requerida | Valor por Defecto | Descripción |
-|---|---|---|---|
-| `MCP_QA_PATH` | No | `/qa` | Ruta base para el MCP paralelo (ej: `/qa`, `/interno`, etc.). |
-| `CONTABILIUM_QA_BASE_URL` | No | `CONTABILIUM_BASE_URL` | **URL Base de la API para QA / Sandbox / Mock**. |
-| `CONTABILIUM_QA_CLIENT_ID` | Opcional | *(Vacío)* | Email de API para QA configurado en el servidor Vercel. |
-| `CONTABILIUM_QA_CLIENT_SECRET` | Opcional | *(Vacío)* | API Key privada de QA en Vercel. |
-| `CONTABILIUM_QA_COUNTRY` | No | `AR` | País de la cuenta fiscal de QA (`AR`, `CL`, `UY`). |
-| `MCP_QA_SECRET` | Recomendada | *(Vacío)* | Secreto para restringir el acceso a la ruta de QA contra accesos no autorizados. |
-| `MCP_QA_NAME` | No | `contabilium-mcp-qa` | Nombre del servidor reportado a Claude en el handshake de MCP. |
-
-#### Endpoints Disponibles del MCP Paralelo:
-- **Streamable HTTP (Estándar recomendado Claude 2026):** `https://tu-proyecto.vercel.app/qa/mcp`
-- **Legacy SSE:** `https://tu-proyecto.vercel.app/qa/sse`
-- **Portal Web Privado de QA:** `https://tu-proyecto.vercel.app/qa`
-
-#### Métodos de Conexión a Claude:
-
-##### Modo A: Conexión Directa con Credenciales en Vercel (Recomendado para QA)
-1. En Vercel, agrega las variables:
-   - `CONTABILIUM_QA_BASE_URL` (URL base de QA)
-   - `CONTABILIUM_QA_CLIENT_ID` (Email API de la cuenta de pruebas)
-   - `CONTABILIUM_QA_CLIENT_SECRET` (API Key de la cuenta de pruebas)
-   - *(Opcional)* `MCP_QA_SECRET=miClaveSegura123`
-2. En Claude (**Settings > Connectors > Add custom connector**):
-   - **Name:** `Contabilium QA`
-   - **MCP server URL:**
-     - Sin secret: `https://tu-proyecto.vercel.app/qa/mcp`
-     - Con secret: `https://tu-proyecto.vercel.app/qa/mcp?key=miClaveSegura123`
-   - **Authentication:** `No sign-in (Detected)`
-3. Claude se conectará inmediatamente utilizando las credenciales del servidor y la URL Base de QA, sin necesidad de tokens en el query string.
-
-##### Modo B: Token Cifrado mediante el Portal Privado
-1. Accede en el navegador a `https://tu-proyecto.vercel.app/qa` (si configuraste `MCP_QA_SECRET`, agrega `?key=tu_secreto` o ingrésalo en pantalla).
-2. Ingresa el Email y API Key de tu cuenta de pruebas y presiona **Generar URL QA**.
-3. Copia el conector generado (`https://tu-proyecto.vercel.app/qa/mcp?auth=<TOKEN_CIFRADO_QA>`) y pégalo en Claude.
-
-#### Verificación de Conectividad y Ambiente:
-Para confirmar que estás operando sobre el entorno correcto, pídele a Claude:
-> *"Verifica el estado de autenticación y conectividad de Contabilium"*
-
-La herramienta `contabilium_auth_status` responderá con:
-```json
-{
-  "configuracion": {
-    "ambiente": "QA / Paralelo",
-    "usuarioIdentificador": "qa***@empresa.com",
-    "pais": "AR",
-    "urlBase": "https://rest.contabilium.com"
-  },
-  "conexionEnVivo": {
-    "conectado": true,
-    "razonSocial": "Empresa Verificada (QA)"
-  }
-}
-```
-

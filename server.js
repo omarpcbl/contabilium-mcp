@@ -241,13 +241,14 @@ app.post("/api/verify-portal-access", (req, res) => {
 // -------------------------------------------------------------
 app.post("/api/generate-token", async (req, res) => {
   const { clientId, clientSecret, country = "AR", target, key } = req.body;
-  const isParallel = target === "qa" || target === "parallel";
+  // [SEGURIDAD] Ruta paralela / QA deshabilitada para evitar superficie de exposición.
+  // const isParallel = target === "qa" || target === "parallel";
+  // if (isParallel && !validateQaAccess({ query: { key }, headers: req.headers })) {
+  //   return res.status(401).json({ ok: false, error: "No autorizado: Secreto de acceso a QA inválido." });
+  // }
+  const isParallel = false;
 
-  if (isParallel && !validateQaAccess({ query: { key }, headers: req.headers })) {
-    return res.status(401).json({ ok: false, error: "No autorizado: Secreto de acceso a QA inválido." });
-  }
-
-  if (!isParallel && !validatePortalAccess(req) && !validatePortalAccess({ query: { key }, headers: req.headers })) {
+  if (!validatePortalAccess(req) && !validatePortalAccess({ query: { key }, headers: req.headers })) {
     return res.status(401).json({ ok: false, error: "No autorizado: Acceso restringido al portal." });
   }
 
@@ -2495,9 +2496,11 @@ app.post("/messages", async (req, res) => {
 });
 
 // -------------------------------------------------------------
-// 3. TRANSPORTE PARALELO / QA: Streamable HTTP (${QA_PATH}/mcp)
-// Endpoint aislado para QA o permisos diferenciados
+// [DESHABILITADO POR SEGURIDAD]
+// 3. TRANSPORTE PARALELO / QA (${QA_PATH}/mcp, ${QA_PATH}/sse y Portal QA)
+// Se mantiene comentado para evitar exposición de endpoints paralelos en producción.
 // -------------------------------------------------------------
+/*
 app.all(`${QA_PATH}/mcp`, async (req, res) => {
   if (!validateQaAccess(req)) {
     res.status(401).json({ error: "No autorizado: Token de acceso o secreto de QA inválido." });
@@ -2989,6 +2992,7 @@ app.get(QA_PATH, (req, res) => {
 </html>
   `);
 });
+*/
 
 // Arrancar en standalone si no corre en Vercel Serverless
 if (!process.env.VERCEL) {
@@ -2996,9 +3000,9 @@ if (!process.env.VERCEL) {
     console.log(`🚀 Contabilium MCP Server activo en puerto ${PORT}`);
     console.log(`✨ Streamable HTTP Producción: http://localhost:${PORT}/mcp`);
     console.log(`📡 Legacy SSE Producción: http://localhost:${PORT}/sse`);
-    console.log(`🧪 Streamable HTTP QA / Paralelo: http://localhost:${PORT}${QA_PATH}/mcp`);
-    console.log(`🔬 Legacy SSE QA / Paralelo: http://localhost:${PORT}${QA_PATH}/sse`);
-    console.log(`⚙️  Portal Privado QA: http://localhost:${PORT}${QA_PATH}`);
+    // console.log(`🧪 Streamable HTTP QA / Paralelo: http://localhost:${PORT}${QA_PATH}/mcp`);
+    // console.log(`🔬 Legacy SSE QA / Paralelo: http://localhost:${PORT}${QA_PATH}/sse`);
+    // console.log(`⚙️  Portal Privado QA: http://localhost:${PORT}${QA_PATH}`);
   });
 }
 

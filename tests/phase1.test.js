@@ -11,7 +11,8 @@ import * as registrarConsultaNoSoportada from "../src/tools/registrar_consulta_n
 import * as diagnosticarOrden from "../src/tools/diagnosticar_orden.js";
 import * as buscarOrdenesVenta from "../src/tools/buscar_ordenes_venta.js";
 import * as enviarVenta from "../src/tools/enviar_venta.js";
-import { registerContabiliumTools } from "../src/register-tools.js";
+import * as emularFacturacion from "../src/tools/emular_facturacion.js";
+import { registerContabiliumTools, isToolAllowed } from "../src/register-tools.js";
 import { classifyFiscalInvoice, formatIsoWeekLabel, formatYearMonthLabel, getTodayString, renderProgressBar, validateTaxId } from "../src/utils.js";
 import { SYSTEM_INSTRUCTION } from "../src/instructions.js";
 import { ContabiliumClient } from "../src/contabilium-client.js";
@@ -247,9 +248,11 @@ describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
     });
   });
 
-  describe("Blindaje de Tools de Facturación en Producción (BUG-15)", () => {
-    it("oculta tools de facturación por defecto y registra solo las 11 tools de lectura/asistencia", () => {
+  describe("Blindaje de Tools de Facturación y Control por NOT_ALLOWED_TOOLS (BUG-15)", () => {
+    it("habilita por defecto emular_facturacion y crear_borrador_factura y oculta emisión fiscal directa ante AFIP", () => {
       delete process.env.ENABLE_BILLING_TOOLS;
+      delete process.env.NOT_ALLOWED_TOOLS;
+      delete process.env.DISABLED_TOOLS;
 
       const registeredTools = new Map();
       const registeredPrompts = new Map();
@@ -264,13 +267,12 @@ describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
 
       registerContabiliumTools(mockServer, { isParallel: false });
 
-      // No están las 4 de facturación
-      assert.equal(registeredTools.has("crear_borrador_factura"), false);
+      // Bloqueadas por defecto las de emisión fiscal directa / PDF
       assert.equal(registeredTools.has("autorizar_factura_electronica"), false);
       assert.equal(registeredTools.has("emitir_factura_express"), false);
       assert.equal(registeredTools.has("obtener_factura_pdf"), false);
 
-      // Sí están las 16 de lectura, asistencia, modificación, stock, órdenes y diagnóstico
+      // Habilitadas por defecto las 18 tools (incluyendo emular_facturacion y crear_borrador_factura)
       const expectedTools = [
         "que_puedo_consultar",
         "buscar_clientes",
@@ -286,6 +288,8 @@ describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
         "diagnosticar_orden",
         "buscar_ordenes_venta",
         "enviar_venta",
+        "emular_facturacion",
+        "crear_borrador_factura",
         "registrar_consulta_no_soportada",
         "contabilium_auth_status",
       ];
@@ -293,7 +297,49 @@ describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
       for (const t of expectedTools) {
         assert.equal(registeredTools.has(t), true, `La tool ${t} debe estar registrada`);
       }
-      assert.equal(registeredTools.size, 16);
+      assert.equal(registeredTools.size, 18);
+    });
+
+    it("permite apagar tools individuales mediante la variable de entorno NOT_ALLOWED_TOOLS", async () => {
+      const prevNotAllowed = process.env.NOT_ALLOWED_TOOLS;
+      try {
+        process.env.NOT_ALLOWED_TOOLS = "modificar_stock_concepto, enviar_venta, crear_borrador_factura";
+
+        assert.equal(isToolAllowed("modificar_stock_concepto"), false);
+        assert.equal(isToolAllowed("enviar_venta"), false);
+        assert.equal(isToolAllowed("crear_borrador_factura"), false);
+        assert.equal(isToolAllowed("emular_facturacion"), true);
+        assert.equal(isToolAllowed("modificar_concepto"), true);
+
+        const registeredTools = new Map();
+        const mockServer = {
+          tool: (name, _desc, _schema, handler) => {
+            registeredTools.set(name, handler);
+          },
+          prompt: () => {},
+        };
+
+        registerContabiliumTools(mockServer, { isParallel: false });
+
+        assert.equal(registeredTools.has("modificar_stock_concepto"), false);
+        assert.equal(registeredTools.has("enviar_venta"), false);
+        assert.equal(registeredTools.has("crear_borrador_factura"), false);
+        assert.equal(registeredTools.has("emular_facturacion"), true);
+
+        // Además que_puedo_consultar refleja el estado deshabilitado
+        const mockClient = { get: async () => null };
+        const guideRes = await quePuedoConsultar.handler({ tool: "enviar_venta" }, mockClient);
+        const guideParsed = JSON.parse(guideRes.content[0].text);
+        assert.equal(guideParsed.datos.detalle_tool_consultada.habilitada_actualmente, false);
+        assert.match(guideParsed.datos.detalle_tool_consultada.aviso_estado, /NOT_ALLOWED_TOOLS/);
+        assert.equal("enviar_venta" in guideParsed.datos.catalogo_tools, false);
+      } finally {
+        if (prevNotAllowed !== undefined) {
+          process.env.NOT_ALLOWED_TOOLS = prevNotAllowed;
+        } else {
+          delete process.env.NOT_ALLOWED_TOOLS;
+        }
+      }
     });
 
     it("SYSTEM_INSTRUCTION instruye rechazar facturación indicando que no está habilitado actualmente (MEJ-10)", () => {
@@ -2259,5 +2305,117 @@ describe("Fase 1, 1.1 y 1.2 — Verificación Automatizada de Tickets", () => {
     });
   });
 
+  describe("emular_facturacion (Simulador Dry-Run para integradores de API)", () => {
+    it("simula facturación en modo Dry-Run, determina Factura A según Matriz AFIP y devuelve contratos JSON sin hacer POST", async () => {
+      let postInvocado = false;
+      const mockClient = {
+        country: "AR",
+        get: async (endpoint) => {
+          if (endpoint === "/usuarios/obtenerinfo") {
+            return { RazonSocial: "Mi Empresa RI S.A.", CondicionIVA: "RI", TieneFE: true };
+          }
+          if (endpoint === "/clientes/search") {
+            return {
+              Items: [
+                {
+                  Id: 778,
+                  RazonSocial: "Cliente Corporativo S.R.L.",
+                  NroDoc: "20123456786",
+                  TipoDoc: "CUIT",
+                  CondicionIva: "RI",
+                },
+              ],
+            };
+          }
+          if (endpoint === "/puntosdeventa/search") {
+            return [{ Id: 4, Nombre: "PV Electrónico 0004", Activo: true }];
+          }
+          if (endpoint === "/usuarios/condicionesVenta") {
+            return [{ Nombre: "MercadoPago" }, { Nombre: "Cuenta Corriente" }];
+          }
+          if (endpoint === "/conceptos/getByCodigo") {
+            return { Id: 901, Codigo: "CASCO-01", Nombre: "Casco Seguridad" };
+          }
+          return null;
+        },
+        post: async () => {
+          postInvocado = true;
+        },
+      };
+
+      const res = await emularFacturacion.handler(
+        {
+          id_cliente: 778,
+          cliente_documento: "20-12345678-6",
+          condicion_venta: "mercado pago", // Debe normalizarse a 'MercadoPago' y advertir C2
+          items: [
+            {
+              codigo: "CASCO-01",
+              concepto: "Casco Seguridad",
+              cantidad: 2,
+              precio_unitario: 10000,
+              iva: 21,
+            },
+          ],
+          nro_orden_ecommerce: "ORD-900",
+          id_integracion: 27341,
+        },
+        mockClient
+      );
+
+      const parsed = JSON.parse(res.content[0].text);
+      assert.equal(postInvocado, false, "Jamás debe emitir un POST en modo Dry-Run");
+      assert.equal(parsed.datos.modo, "SIMULACION_DRY_RUN_SIN_IMPACTO_FISCAL");
+      assert.equal(parsed.datos.estado_simulacion, "LISTO_PARA_INTEGRAR");
+      assert.equal(parsed.datos.determinacion_fiscal_afip.tipo_factura_resultante, "FA");
+      assert.equal(parsed.datos.totales_calculados.subtotal_neto, 20000);
+      assert.equal(parsed.datos.totales_calculados.total_iva, 4200);
+      assert.equal(parsed.datos.totales_calculados.total_comprobante, 24200);
+      assert.ok(parsed.advertencias.some((a) => a.includes("Error C2")));
+
+      const contratos = parsed.datos.contratos_api_listos_para_usar;
+      assert.equal(contratos.opcion_1_flujo_seguro_en_dos_pasos.paso_1_crear_borrador.payload_json.TipoFc, "FA");
+      assert.equal(contratos.opcion_1_flujo_seguro_en_dos_pasos.paso_1_crear_borrador.payload_json.CondicionVenta, "MercadoPago");
+      assert.equal(contratos.opcion_1_flujo_seguro_en_dos_pasos.paso_1_crear_borrador.payload_json.PuntoVenta, 4);
+      assert.match(contratos.opcion_3_facturar_orden_ecommerce.endpoint, /nro=ORD-900&idIntegracion=27341/);
+    });
+
+    it("detecta errores de validación (TipoFc incompatible con AFIP, envío de CUIL en RI y descalce de pagos)", async () => {
+      const mockClient = {
+        country: "AR",
+        get: async (endpoint) => {
+          if (endpoint === "/usuarios/obtenerinfo") {
+            return { RazonSocial: "Emisor RI", CondicionIVA: "RI", TieneFE: true };
+          }
+          if (endpoint === "/clientes/search") {
+            return {
+              Items: [{ Id: 50, RazonSocial: "Receptor RI", NroDoc: "20123456786", CondicionIva: "RI" }],
+            };
+          }
+          return [];
+        },
+      };
+
+      const res = await emularFacturacion.handler(
+        {
+          id_cliente: 50,
+          cliente_documento: "20123456786",
+          cliente_tipo_documento: "CUIL",
+          cliente_condicion_iva: "RI",
+          tipo_factura: "FB", // Incompatible: RI a RI exige FA
+          items: [{ concepto: "Servicio", cantidad: 1, precio_unitario: 10000, iva: 21 }],
+          pagos: [{ forma_de_pago: "Efectivo", importe: 5000 }], // Descalzado (total es 12100)
+        },
+        mockClient
+      );
+
+      const parsed = JSON.parse(res.content[0].text);
+      assert.equal(parsed.datos.estado_simulacion, "ERRORES_DE_VALIDACION_DETECTADOS");
+      const codigosError = parsed.datos.errores_detectados.map((e) => e.codigo);
+      assert.ok(codigosError.includes("TIPO_DOCUMENTO_CUIL_FUERZA_CF_C9"));
+      assert.ok(codigosError.includes("TIPO_FACTURA_INCOMPATIBLE_AFIP"));
+      assert.ok(codigosError.includes("DESCALCE_IMPORTE_PAGOS"));
+    });
+  });
 
 });

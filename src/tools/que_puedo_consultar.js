@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { formatToolResponse } from "../utils.js";
+import { isToolAllowed } from "../register-tools.js";
 
 export const schema = {
   categoria: z
@@ -10,11 +11,79 @@ export const schema = {
     .string()
     .optional()
     .describe(
-      "Nombre de una tool específica sobre la cual consultar cómo funciona internamente y qué parámetros espera (ej: 'enviar_venta', 'buscar_ordenes_venta', 'diagnosticar_orden', 'modificar_concepto', 'modificar_stock_concepto', 'resumen_ventas', 'listar_ventas', 'stock_por_deposito', 'cuentas_por_cobrar', 'buscar_clientes', 'buscar_productos', 'buscar_proveedores', 'listar_depositos')."
+      "Nombre de una tool específica sobre la cual consultar cómo funciona internamente y qué parámetros espera (ej: 'emular_facturacion', 'crear_borrador_factura', 'enviar_venta', 'buscar_ordenes_venta', 'diagnosticar_orden', 'modificar_concepto', 'modificar_stock_concepto', 'resumen_ventas', 'listar_ventas', 'stock_por_deposito', 'cuentas_por_cobrar', 'buscar_clientes', 'buscar_productos', 'buscar_proveedores', 'listar_depositos')."
     ),
 };
 
 const GUIA_DETALLADA_TOOLS = {
+  emular_facturacion: {
+    nombre: "emular_facturacion",
+    modulo: "Ventas, Órdenes y Facturación Comercial",
+    proposito: "Simulador Dry-Run 100% libre de riesgo fiscal: valida cliente, CUIT/DNI/RUT, letra del comprobante según Matriz AFIP (FA/FB/FC), punto de venta, condición de venta, SKUs y stock, y genera los payloads JSON exactos para integrar con la API.",
+    como_funciona: [
+      "No emite facturas ni crea registros en Contabilium ni en AFIP/ARCA (operación de solo lectura y validación en vivo).",
+      "Cruza la condición de IVA de la empresa emisora (/usuarios/obtenerinfo) contra la del cliente receptor (/clientes/search) aplicando la Matriz Oficial de AFIP (RG 5003) para determinar si corresponde Factura A ('FA'), Factura B ('FB') o Factura C ('FC').",
+      "Detecta errores frecuentes de integración antes de que ocurran en producción: envío de CUIL esperando Factura A (Error C9), condición de venta con diferencias de espacios o mayúsculas (Error C2), punto de venta inactivo, SKUs inexistentes o descalce en la suma de pagos.",
+      "Devuelve los contratos HTTP y payloads JSON listos para copiar y pegar en POST /api/comprobantes/crear (borrador), POST /api/comprobantes/emitirFECobrada (emisión directa) y GET /api/ordenesventa/emitirFE (facturación de orden e-commerce).",
+    ],
+    que_espera: {
+      parametros_obligatorios: {
+        items: "Array (mínimo 1 ítem) con { concepto, cantidad, precio_unitario (neto sin IVA), iva (default 21), codigo (SKU opcional), bonificacion (default 0) }.",
+      },
+      parametros_opcionales: {
+        id_cliente: "Number. ID numérico del cliente en Contabilium.",
+        cliente_documento: "String. CUIT, DNI o RUT del cliente receptor para buscarlo en padrón y validar su dígito verificador.",
+        cliente_tipo_documento: "Enum: 'CUIT' | 'CUIL' | 'DNI' | 'RUT' | 'CI' | 'OTRO'.",
+        cliente_condicion_iva: "Enum: 'RI' | 'MO' | 'CF' | 'EX'.",
+        tipo_factura: "Enum: 'FA' | 'FB' | 'FC' | 'FM' | 'FCE'. Si se envía, valida si es compatible según AFIP.",
+        punto_venta: "Number. ID del punto de venta a validar.",
+        condicion_venta: "String (default 'Cuenta Corriente'). Se contrasta contra /usuarios/condicionesVenta.",
+        id_deposito: "Number. ID del depósito para auditar stock disponible de los SKUs.",
+        pagos: "Array opcional de pagos { forma_de_pago, importe, id_caja, id_banco, nro_referencia }.",
+        nro_orden_ecommerce: "String. Código externo de la orden (IdVentaIntegracion) si querés simular GET /api/ordenesventa/emitirFE.",
+        id_integracion: "Number. ID de la integración e-commerce.",
+      },
+    },
+    ejemplo_uso: {
+      cliente_documento: "20-12345678-6",
+      cliente_tipo_documento: "CUIT",
+      condicion_venta: "MercadoPago",
+      items: [
+        {
+          codigo: "CASCO-01",
+          concepto: "Casco de seguridad",
+          cantidad: 2,
+          precio_unitario: 15000,
+          iva: 21,
+        },
+      ],
+    },
+  },
+  crear_borrador_factura: {
+    nombre: "crear_borrador_factura",
+    modulo: "Ventas, Órdenes y Facturación Comercial",
+    proposito: "Guarda un borrador de factura en Contabilium mediante POST /api/comprobantes/crear sin validez fiscal ni llamada a AFIP/ARCA.",
+    como_funciona: [
+      "Precalcula automáticamente la letra del comprobante (FA, FB, FC) según la condición de IVA del emisor y del cliente receptor.",
+      "Selecciona el primer punto de venta activo si no se especifica 'punto_venta', calcula subtotales netos e IVA y graba el comprobante en estado BORRADOR (sin CAE).",
+      "Ideal para practicar la creación de comprobantes en Contabilium o dejar preparada una factura para que un usuario humano la revise y autorice desde la web.",
+    ],
+    que_espera: {
+      parametros_obligatorios: {
+        id_cliente: "Number (entero). ID del cliente en Contabilium (obtenido con 'buscar_clientes').",
+        items: "Array (mínimo 1 ítem) con { concepto, cantidad, precio_unitario, iva (default 21), codigo (opcional), id_concepto (opcional), bonificacion (default 0) }.",
+      },
+      parametros_opcionales: {
+        tipo_factura: "Enum: 'FA' | 'FB' | 'FC' | 'FM' | 'FCE'.",
+        punto_venta: "Number. ID del punto de venta.",
+        condicion_venta: "String (default 'Cuenta Corriente').",
+        id_deposito: "Number. ID del depósito.",
+        tipo_concepto: "Number (1 = Productos, 2 = Servicios, 3 = Ambos; default 1).",
+        fecha_emision: "String (YYYY-MM-DD).",
+        observaciones: "String.",
+      },
+    },
+  },
   enviar_venta: {
     nombre: "enviar_venta",
     modulo: "Ventas, Órdenes y Facturación Comercial",
@@ -318,17 +387,20 @@ export async function handler({ categoria = "todos", tool } = {}, client) {
 
   const moduloVentas = {
     nombre: "Ventas, Órdenes y Facturación Comercial",
-    tools: ["resumen_ventas", "listar_ventas", "buscar_ordenes_venta", "enviar_venta"],
+    tools: ["resumen_ventas", "listar_ventas", "buscar_ordenes_venta", "enviar_venta", "emular_facturacion", "crear_borrador_factura"].filter(isToolAllowed),
     capacidades: [
       "Totalizar ventas netas deduciendo notas de crédito automáticamente.",
       "Desglosar facturación bruta, NC y ticket promedio.",
       "Agrupar por día, semana, mes, cliente u origen de venta.",
       "Consultar órdenes de venta e-commerce y preventas por número de orden o integración.",
       "Enviar (crear o actualizar) órdenes de venta e-commerce con comprador, ítems, costo de envío y descuentos.",
+      "Simular facturación en modo Dry-Run ('emular_facturacion') validando Matriz AFIP (FA/FB/FC), CUIT, punto de venta y generando los payloads JSON exactos para integrar con la API.",
+      "Crear borradores de factura ('crear_borrador_factura') en Contabilium sin validez fiscal ni llamada a AFIP.",
       "Comparar variaciones porcentuales contra el período anterior.",
     ],
     preguntas_ejemplo: [
       "¿Cómo vienen las ventas netas de este mes comparadas con el mes anterior?",
+      "Simulá cómo quedaría el JSON para facturarle 2 cascos a CUIT 20-12345678-6 con MercadoPago.",
       "Buscá la orden de venta 2000018479202700 de la integración 27341.",
       "Enviá una venta para la integración 27341 con orden 'PED-105' a nombre de Juan Pérez.",
       "Mostrame la curva de ventas diarias de los últimos 30 días.",
@@ -338,7 +410,7 @@ export async function handler({ categoria = "todos", tool } = {}, client) {
 
   const moduloStock = {
     nombre: "Inventario, Catálogo y Stock por Depósito",
-    tools: ["stock_por_deposito", "buscar_productos", "listar_depositos", "modificar_concepto", "modificar_stock_concepto"],
+    tools: ["stock_por_deposito", "buscar_productos", "listar_depositos", "modificar_concepto", "modificar_stock_concepto"].filter(isToolAllowed),
     capacidades: [
       "Consultar existencias físicas, reservas comprometidas y disponible real.",
       "Detectar sobreventas críticas y existencias físicas negativas.",
@@ -358,7 +430,7 @@ export async function handler({ categoria = "todos", tool } = {}, client) {
 
   const moduloDeuda = {
     nombre: "Cuentas por Cobrar y Cobranzas",
-    tools: ["cuentas_por_cobrar", "buscar_clientes"],
+    tools: ["cuentas_por_cobrar", "buscar_clientes"].filter(isToolAllowed),
     capacidades: [
       "Totalizar saldos deudores pendientes de cobro.",
       "Identificar deuda vencida y calcular días de mora.",
@@ -373,7 +445,7 @@ export async function handler({ categoria = "todos", tool } = {}, client) {
 
   const moduloDiagnostico = {
     nombre: "Diagnóstico de Órdenes e Integraciones E-Commerce (OP-08)",
-    tools: ["diagnosticar_orden"],
+    tools: ["diagnosticar_orden"].filter(isToolAllowed),
     capacidades: [
       "Diagnosticar órdenes de e-commerce (Fenicio, Base, Vestetic, Luna, etc.) para detectar por qué no se facturaron.",
       "Comprobar si el comprobante ya fue emitido previamente para evitar duplicados.",
@@ -391,7 +463,7 @@ export async function handler({ categoria = "todos", tool } = {}, client) {
     "Rango máximo: hasta 92 días por consulta individual de comprobantes (para períodos anuales, consultar mes por mes).",
     "Paginación segura: tope de 20 páginas (1.000 comprobantes) para garantizar respuestas rápidas y prevenir timeouts.",
     "Filtro fiscal: se excluyen automáticamente cotizaciones (COT/NCT), presupuestos y comprobantes no fiscales.",
-    "Solo lectura: esta integración está diseñada exclusivamente para dashboards y consultas analíticas de gestión (la facturación no está habilitada).",
+    "Protección fiscal: la emisión directa ante AFIP con CAE está deshabilitada; podés usar 'emular_facturacion' (Dry-Run) o 'crear_borrador_factura' (borrador sin CAE) para practicar e integrar con la API.",
   ];
 
   let modulos = [];
@@ -414,6 +486,10 @@ export async function handler({ categoria = "todos", tool } = {}, client) {
     preguntasSugeridas.push(...moduloDiagnostico.preguntas_ejemplo.slice(0, 2));
   }
 
+  const catalogoActivo = Object.fromEntries(
+    Object.entries(GUIA_DETALLADA_TOOLS).filter(([key]) => isToolAllowed(key))
+  );
+
   let detalleToolConsultada = null;
   if (tool && typeof tool === "string" && tool.trim()) {
     const normalizedKey = tool
@@ -423,22 +499,31 @@ export async function handler({ categoria = "todos", tool } = {}, client) {
       .replace(/[\u0300-\u036f]/g, "")
       .replace(/[\s-]+/g, "_");
 
-    detalleToolConsultada =
+    const foundTool =
       GUIA_DETALLADA_TOOLS[normalizedKey] ||
       Object.values(GUIA_DETALLADA_TOOLS).find(
         (t) =>
           t.nombre.includes(normalizedKey) ||
           normalizedKey.includes(t.nombre)
-      ) || {
+      );
+
+    if (foundTool) {
+      const habilitada = isToolAllowed(foundTool.nombre);
+      detalleToolConsultada = {
+        ...foundTool,
+        habilitada_actualmente: habilitada,
+        ...(habilitada
+          ? {}
+          : {
+              aviso_estado: `La tool '${foundTool.nombre}' se encuentra actualmente deshabilitada por configuración (NOT_ALLOWED_TOOLS).`,
+            }),
+        ...(depositos.length > 0 ? { depositos_activos_en_cuenta: depositos } : {}),
+      };
+    } else {
+      detalleToolConsultada = {
         tool_solicitada: tool,
         error: `No se encontró una tool llamada '${tool}'.`,
-        tools_disponibles: Object.keys(GUIA_DETALLADA_TOOLS),
-      };
-
-    if (detalleToolConsultada && !detalleToolConsultada.error && depositos.length > 0) {
-      detalleToolConsultada = {
-        ...detalleToolConsultada,
-        depositos_activos_en_cuenta: depositos,
+        tools_disponibles: Object.keys(catalogoActivo),
       };
     }
   }
@@ -452,7 +537,7 @@ export async function handler({ categoria = "todos", tool } = {}, client) {
     },
     ...(detalleToolConsultada ? { detalle_tool_consultada: detalleToolConsultada } : {}),
     modulos,
-    catalogo_tools: GUIA_DETALLADA_TOOLS,
+    catalogo_tools: catalogoActivo,
     limites_del_servicio: limites,
     preguntas_sugeridas_para_iniciar: preguntasSugeridas,
   };

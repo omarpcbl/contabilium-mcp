@@ -12,6 +12,7 @@ import * as quePuedoConsultar from "./tools/que_puedo_consultar.js";
 import * as diagnosticarOrden from "./tools/diagnosticar_orden.js";
 import * as buscarOrdenesVenta from "./tools/buscar_ordenes_venta.js";
 import * as enviarVenta from "./tools/enviar_venta.js";
+import * as emularFacturacion from "./tools/emular_facturacion.js";
 import * as crearBorradorFactura from "./tools/crear_borrador_factura.js";
 import * as autorizarFacturaElectronica from "./tools/autorizar_factura_electronica.js";
 import * as emitirFacturaExpress from "./tools/emitir_factura_express.js";
@@ -20,16 +21,73 @@ import * as registrarConsultaNoSoportada from "./tools/registrar_consulta_no_sop
 import { z } from "zod";
 
 /**
+ * Tools con impacto fiscal directo ante AFIP/ARCA/SII que permanecen deshabilitadas
+ * por defecto salvo que se habiliten explícitamente con ENABLE_BILLING_TOOLS="true".
+ */
+const DEFAULT_FISCAL_BLOCKED_TOOLS = [
+  "autorizar_factura_electronica",
+  "emitir_factura_express",
+  "obtener_factura_pdf",
+];
+
+/**
+ * Obtiene el conjunto (Set) de tools deshabilitadas a través de la variable de entorno
+ * NOT_ALLOWED_TOOLS (o su alias DISABLED_TOOLS), separadas por coma.
+ * Ejemplo: NOT_ALLOWED_TOOLS=modificar_stock_concepto,modificar_concepto,enviar_venta
+ */
+export function getNotAllowedTools() {
+  const raw = process.env.NOT_ALLOWED_TOOLS ?? process.env.DISABLED_TOOLS ?? "";
+  const blocked = new Set(
+    String(raw)
+      .split(",")
+      .map((t) => t.trim().toLowerCase())
+      .filter(Boolean)
+  );
+
+  if (process.env.ENABLE_BILLING_TOOLS !== "true") {
+    for (const fiscalTool of DEFAULT_FISCAL_BLOCKED_TOOLS) {
+      blocked.add(fiscalTool);
+    }
+  }
+
+  return blocked;
+}
+
+/**
+ * Verifica si una tool específica está permitida según la configuración actual de entorno.
+ * Todas las tools están habilitadas por defecto excepto las listadas en NOT_ALLOWED_TOOLS
+ * (y las de autorización fiscal real ante AFIP si ENABLE_BILLING_TOOLS !== "true").
+ *
+ * @param {string} toolName - Nombre exacto de la tool (ej: "modificar_stock_concepto")
+ * @returns {boolean}
+ */
+export function isToolAllowed(toolName) {
+  if (!toolName) return false;
+  const blocked = getNotAllowedTools();
+  return !blocked.has(String(toolName).trim().toLowerCase());
+}
+
+/**
  * Registra las herramientas y prompts del servidor MCP de Contabilium
  * 
  * @param {import("@modelcontextprotocol/sdk/server/mcp.js").McpServer} server 
  * @param {import("./contabilium-client.js").ContabiliumClient} client 
  */
 export function registerContabiliumTools(server, client) {
+  /**
+   * Helper centralizado que registra una tool únicamente si no está en NOT_ALLOWED_TOOLS
+   */
+  const registerTool = (name, description, schema, handler) => {
+    if (!isToolAllowed(name)) {
+      return;
+    }
+    server.tool(name, description, schema, handler);
+  };
+
   // 0. que_puedo_consultar (MEJ-12: Onboarding interactivo, capacidades y explicación de tools)
-  server.tool(
+  registerTool(
     "que_puedo_consultar",
-    "Guía de asistencia y documentación interactiva del MCP: explica qué módulos y consultas están disponibles (ventas, stock, cobranzas, diagnóstico) y, si se consulta por una tool específica (parámetro 'tool'), detalla cómo funciona internamente, qué parámetros obligatorios y opcionales espera y ejemplos de uso.",
+    "Guía de asistencia y documentación interactiva del MCP: explica qué módulos y consultas están disponibles (ventas, stock, cobranzas, diagnóstico, simulación de facturación) y, si se consulta por una tool específica (parámetro 'tool'), detalla cómo funciona internamente, qué parámetros obligatorios y opcionales espera y ejemplos de uso.",
     quePuedoConsultar.schema,
     async (args) => {
       try {
@@ -44,7 +102,7 @@ export function registerContabiliumTools(server, client) {
   );
 
   // 1. buscar_clientes
-  server.tool(
+  registerTool(
     "buscar_clientes",
     "Busca clientes por nombre, razón social o CUIT. Devuelve IDs necesarios para filtrar ventas y deudas.",
     buscarClientes.schema,
@@ -61,7 +119,7 @@ export function registerContabiliumTools(server, client) {
   );
 
   // 2. buscar_productos
-  server.tool(
+  registerTool(
     "buscar_productos",
     "Busca productos por SKU o nombre. Devuelve código, descripción, precio de venta, stock total consolidado, costo_interno (utilizado como costo de compra habitual ante proveedores) y proveedor asignado.",
     buscarProductos.schema,
@@ -78,7 +136,7 @@ export function registerContabiliumTools(server, client) {
   );
 
   // 2b. modificar_concepto
-  server.tool(
+  registerTool(
     "modificar_concepto",
     "Modifica los datos de un concepto, producto o servicio existente en el catálogo de Contabilium (precio, costo interno, alícuota de IVA, nombre, descripción, estado activo/inactivo, rubro, código de barras, SKU, etc.). No crea conceptos nuevos, únicamente actualiza conceptos existentes.",
     modificarConcepto.schema,
@@ -95,7 +153,7 @@ export function registerContabiliumTools(server, client) {
   );
 
   // 2c. modificar_stock_concepto
-  server.tool(
+  registerTool(
     "modificar_stock_concepto",
     "Modifica o reemplaza el stock físico (y opcionalmente el precio) de un concepto/producto en Contabilium identificándolo por SKU o por ID en un depósito específico (o depósito central por defecto).",
     modificarStockConcepto.schema,
@@ -112,7 +170,7 @@ export function registerContabiliumTools(server, client) {
   );
 
   // 3. buscar_proveedores
-  server.tool(
+  registerTool(
     "buscar_proveedores",
     "Busca proveedores por razón social, nombre de fantasía o CUIT. Devuelve datos de contacto para reposición y compras.",
     buscarProveedores.schema,
@@ -129,7 +187,7 @@ export function registerContabiliumTools(server, client) {
   );
 
   // 4. listar_depositos
-  server.tool(
+  registerTool(
     "listar_depositos",
     "Lista los depósitos configurados con sus IDs. Usar antes de consultar stock por depósito.",
     listarDepositos.schema,
@@ -146,7 +204,7 @@ export function registerContabiliumTools(server, client) {
   );
 
   // 5. listar_ventas
-  server.tool(
+  registerTool(
     "listar_ventas",
     "Lista comprobantes de venta emitidos en un período. Máximo 92 días por consulta.",
     listarVentas.schema,
@@ -163,7 +221,7 @@ export function registerContabiliumTools(server, client) {
   );
 
   // 6. resumen_ventas (MEJ-14: descripción armonizada con schema)
-  server.tool(
+  registerTool(
     "resumen_ventas",
     "Totaliza ventas por período, agrupables por día, mes, semana, cliente, producto, rubro u origen. Resta notas de crédito y excluye cotizaciones.",
     resumenVentas.schema,
@@ -180,7 +238,7 @@ export function registerContabiliumTools(server, client) {
   );
 
   // 7. stock_por_deposito
-  server.tool(
+  registerTool(
     "stock_por_deposito",
     "Consulta stock actual y reservado de un producto en un depósito específico o en todos. Calcula disponible real y alerta sobreventas.",
     stockPorDeposito.schema,
@@ -197,7 +255,7 @@ export function registerContabiliumTools(server, client) {
   );
 
   // 8. cuentas_por_cobrar (MEJ-14: descripción armonizada)
-  server.tool(
+  registerTool(
     "cuentas_por_cobrar",
     "Lista comprobantes pendientes de cobro y genera el reporte de antigüedad de deuda (Aging: 0-30, 31-60, 61-90, >90 días). Excluye cotizaciones.",
     cuentasPorCobrar.schema,
@@ -214,7 +272,7 @@ export function registerContabiliumTools(server, client) {
   );
 
   // OP-08: diagnosticar_orden (Diagnóstico de órdenes e integraciones e-commerce)
-  server.tool(
+  registerTool(
     "diagnosticar_orden",
     "Diagnóstico automatizado de órdenes e integraciones e-commerce (Fenicio, Base, Vestetic, Luna, etc.): detecta duplicados, valida CUIT/RUT del cliente, verifica existencia de SKUs en catálogo, revisa stock disponible en depósito y señala la causa raíz si la orden no se facturó.",
     diagnosticarOrden.schema,
@@ -231,7 +289,7 @@ export function registerContabiliumTools(server, client) {
   );
 
   // OP-09: buscar_ordenes_venta (Búsqueda de órdenes de venta e integraciones e-commerce)
-  server.tool(
+  registerTool(
     "buscar_ordenes_venta",
     "Busca y lista órdenes de venta e-commerce o preventas en Contabilium por rango de fechas (máx 92 días), filtro (número de orden, referencia externa o cliente) e ID de integración opcional. Devuelve estado, totales, facturación asociada e ítems.",
     buscarOrdenesVenta.schema,
@@ -248,7 +306,7 @@ export function registerContabiliumTools(server, client) {
   );
 
   // OP-10: enviar_venta (Envío y actualización de órdenes de venta e-commerce vía /notificador/ecommerce)
-  server.tool(
+  registerTool(
     "enviar_venta",
     "Envía (crea o actualiza) una orden de venta e-commerce en Contabilium mediante POST /notificador/ecommerce sin emitir factura fiscal. Espera obligatoriamente: 'id_venta_integracion' (nro de orden), 'condicion_venta' (validada contra la cuenta), 'cliente' (con 'nombre' obligatorio y documento fiscal validado) e 'items' (array con 'codigo'/SKU, 'cantidad' y 'precio_unitario' sin IVA). Opcionalmente acepta 'deposito' por nombre (se resuelve automáticamente a IDInventario en /inventarios/getDepositos; si se omite, Contabilium usa el depósito de reserva predeterminado de la integración), 'id_deposito', 'id_integracion' (se autodescubre si hay 1 sola activa), 'estado_integracion', 'costo_envio' y 'descuento_general'.",
     enviarVenta.schema,
@@ -265,82 +323,103 @@ export function registerContabiliumTools(server, client) {
   );
 
   // ---------------------------------------------------------------------------
-  // Módulo de Facturación y Emisión Electrónica (BUG-15)
-  // En el MVP de solo lectura para dashboards, las tools de facturación se ocultan
-  // por defecto para prevenir emisiones accidentales con validez fiscal.
+  // Simulador y Borradores de Facturación (Onboarding de Integradores API)
+  // Habilitados por defecto para practicar e integrar sin riesgo fiscal ante AFIP.
+  // Se pueden apagar individualmente agregándolos a NOT_ALLOWED_TOOLS.
   // ---------------------------------------------------------------------------
-  if (process.env.ENABLE_BILLING_TOOLS === "true") {
-    // 9. crear_borrador_factura (Paso 1 del Flujo Seguro)
-    server.tool(
-      "crear_borrador_factura",
-      "Paso 1 del flujo seguro: Prepara y guarda un borrador de factura en Contabilium (sin impacto fiscal ni llamada a AFIP aún) para presentar el preview interactivo al usuario.",
-      crearBorradorFactura.schema,
-      async (args) => {
-        try {
-          return await crearBorradorFactura.handler(args, client);
-        } catch (err) {
-          return {
-            content: [{ type: "text", text: JSON.stringify({ error: err.message, datos: null, resumen: "Error al crear el borrador de factura", advertencias: [err.message], truncado: false }, null, 2) }],
-            isError: true,
-          };
-        }
-      }
-    );
 
-    // 10. autorizar_factura_electronica (Paso 2 del Flujo Seguro)
-    server.tool(
-      "autorizar_factura_electronica",
-      "Paso 2 del flujo seguro: Recibe el ID de un borrador ya confirmado por el humano y lo envía a autorizar ante el fisco (AFIP/SII) para obtener el CAE/Folio y el link PDF.",
-      autorizarFacturaElectronica.schema,
-      async (args) => {
-        try {
-          return await autorizarFacturaElectronica.handler(args, client);
-        } catch (err) {
-          return {
-            content: [{ type: "text", text: JSON.stringify({ error: err.message, datos: null, resumen: "Error al autorizar electrónicamente la factura ante el fisco", advertencias: [err.message], truncado: false }, null, 2) }],
-            isError: true,
-          };
-        }
+  // 8b. emular_facturacion (Dry-Run 100% lectura: valida reglas AFIP y genera payloads JSON de ejemplo)
+  registerTool(
+    "emular_facturacion",
+    "Simulador Dry-Run de facturación (sin impacto fiscal ni creación de comprobantes): valida cliente en padrón, algoritmo de CUIT/DNI/RUT, letra de factura según Matriz AFIP (FA/FB/FC), punto de venta activo, condición de venta, SKUs y stock, devolviendo los contratos y payloads JSON exactos para integrar con la API.",
+    emularFacturacion.schema,
+    async (args) => {
+      try {
+        return await emularFacturacion.handler(args, client);
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ error: err.message, datos: null, resumen: "Error al simular la facturación", advertencias: [err.message], truncado: false }, null, 2) }],
+          isError: true,
+        };
       }
-    );
+    }
+  );
 
-    // 11. emitir_factura_express (Flujo Express / Directo)
-    server.tool(
-      "emitir_factura_express",
-      "Emisión express en 1 solo paso: Crea, cobra y autoriza fiscalmente la factura de forma inmediata. Usar ÚNICAMENTE si el usuario lo solicita explícitamente.",
-      emitirFacturaExpress.schema,
-      async (args) => {
-        try {
-          return await emitirFacturaExpress.handler(args, client);
-        } catch (err) {
-          return {
-            content: [{ type: "text", text: JSON.stringify({ error: err.message, datos: null, resumen: "Error en la emisión express", advertencias: [err.message], truncado: false }, null, 2) }],
-            isError: true,
-          };
-        }
+  // 9. crear_borrador_factura (Paso 1 del Flujo Seguro - guarda borrador sin CAE de AFIP)
+  registerTool(
+    "crear_borrador_factura",
+    "Prepara y guarda un borrador de factura en Contabilium (POST /api/comprobantes/crear) sin validez fiscal ni llamada a AFIP/ARCA, ideal para revisar el preview del comprobante o practicar integraciones.",
+    crearBorradorFactura.schema,
+    async (args) => {
+      try {
+        return await crearBorradorFactura.handler(args, client);
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ error: err.message, datos: null, resumen: "Error al crear el borrador de factura", advertencias: [err.message], truncado: false }, null, 2) }],
+          isError: true,
+        };
       }
-    );
+    }
+  );
 
-    // 12. obtener_factura_pdf
-    server.tool(
-      "obtener_factura_pdf",
-      "Obtiene el estado de emisión y la URL para visualizar y descargar el PDF oficial de una factura emitida.",
-      obtenerFacturaPdf.schema,
-      async (args) => {
-        try {
-          return await obtenerFacturaPdf.handler(args, client);
-        } catch (err) {
-          return {
-            content: [{ type: "text", text: JSON.stringify({ error: err.message, datos: null, resumen: "Error al obtener el PDF de la factura", advertencias: [err.message], truncado: false }, null, 2) }],
-            isError: true,
-          };
-        }
+  // ---------------------------------------------------------------------------
+  // Emisión Fiscal Electrónica Directa (AFIP / ARCA / SII)
+  // Bloqueadas por defecto salvo ENABLE_BILLING_TOOLS="true"
+  // ---------------------------------------------------------------------------
+
+  // 10. autorizar_factura_electronica
+  registerTool(
+    "autorizar_factura_electronica",
+    "Recibe el ID de un borrador ya confirmado por el humano y lo envía a autorizar ante el fisco (AFIP/SII) para obtener el CAE/Folio y el link PDF.",
+    autorizarFacturaElectronica.schema,
+    async (args) => {
+      try {
+        return await autorizarFacturaElectronica.handler(args, client);
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ error: err.message, datos: null, resumen: "Error al autorizar electrónicamente la factura ante el fisco", advertencias: [err.message], truncado: false }, null, 2) }],
+          isError: true,
+        };
       }
-    );
-  }
+    }
+  );
+
+  // 11. emitir_factura_express
+  registerTool(
+    "emitir_factura_express",
+    "Emisión express en 1 solo paso: Crea, cobra y autoriza fiscalmente la factura de forma inmediata. Usar ÚNICAMENTE si el usuario lo solicita explícitamente.",
+    emitirFacturaExpress.schema,
+    async (args) => {
+      try {
+        return await emitirFacturaExpress.handler(args, client);
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ error: err.message, datos: null, resumen: "Error en la emisión express", advertencias: [err.message], truncado: false }, null, 2) }],
+          isError: true,
+        };
+      }
+    }
+  );
+
+  // 12. obtener_factura_pdf
+  registerTool(
+    "obtener_factura_pdf",
+    "Obtiene el estado de emisión y la URL para visualizar y descargar el PDF oficial de una factura emitida.",
+    obtenerFacturaPdf.schema,
+    async (args) => {
+      try {
+        return await obtenerFacturaPdf.handler(args, client);
+      } catch (err) {
+        return {
+          content: [{ type: "text", text: JSON.stringify({ error: err.message, datos: null, resumen: "Error al obtener el PDF de la factura", advertencias: [err.message], truncado: false }, null, 2) }],
+          isError: true,
+        };
+      }
+    }
+  );
 
   // 13. registrar_consulta_no_soportada
-  server.tool(
+  registerTool(
     "registrar_consulta_no_soportada",
     "Registra internamente una consulta que el MCP no pudo responder y devuelve una alternativa constructiva para orientar al usuario.",
     registrarConsultaNoSoportada.schema,
@@ -357,7 +436,7 @@ export function registerContabiliumTools(server, client) {
   );
 
   // Tool auxiliar de diagnóstico y autenticación de la conexión
-  server.tool(
+  registerTool(
     "contabilium_auth_status",
     "Verifica el estado del token y conectividad con la cuenta de Contabilium.",
     { ping: z.boolean().default(true).describe("Si es true, valida conexión en vivo con Contabilium.") },
