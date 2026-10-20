@@ -295,10 +295,30 @@ export async function getAccountIntegrations(client, fechaDesde, fechaHasta) {
   try {
     const compRes = await client.get("/comprobantes/search", { fechaDesde, fechaHasta, page: 1 }, 60);
     const items = Array.isArray(compRes) ? compRes : (compRes?.Items || compRes?.items || []);
+    const candidatesByOrigen = new Map();
     for (const c of items) {
       const idInt = c.IDIntegracion ?? c.IdIntegracion ?? c.idIntegracion;
       if (idInt !== undefined && idInt !== null && !isNaN(Number(idInt)) && Number(idInt) > 0) {
         integraciones.add(Number(idInt));
+      } else if (c.Id && (c.IDVentaIntegracion || c.Origen)) {
+        const key = String(c.Origen || c.IDVentaIntegracion).trim();
+        if (key && !candidatesByOrigen.has(key) && candidatesByOrigen.size < 3) {
+          candidatesByOrigen.set(key, c.Id);
+        }
+      }
+    }
+
+    if (integraciones.size === 0 && candidatesByOrigen.size > 0) {
+      for (const compId of candidatesByOrigen.values()) {
+        try {
+          const detail = await client.get("/comprobantes", { id: compId }, 300);
+          const idInt = detail?.IDIntegracion ?? detail?.IdIntegracion ?? detail?.idIntegracion;
+          if (idInt !== undefined && idInt !== null && !isNaN(Number(idInt)) && Number(idInt) > 0) {
+            integraciones.add(Number(idInt));
+          }
+        } catch {
+          // Continuar
+        }
       }
     }
   } catch {
